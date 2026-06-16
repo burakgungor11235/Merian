@@ -1,0 +1,42 @@
+
+[ ] Basic syntax              |
+	[ ] inline                |  tokenize + parse 
+		- bold                |
+		- italic 
+		- underline 
+		- strikethru
+	[ ] block 
+		- paragraph
+		- blockquote
+
+[ ] IR - 1                    | AST -> IR
+[ ] Output to HTML            | IR  -> HTML  
+
+-------- MILESTONE 1 ---------| basic functionality
+[ ] Chunks 
+	[ ] Syntax                | pointer syntax step 1 
+	    - Implicit 
+		- Explicit 
+		
+	[ ] Resolving 
+
+[ ] Bind Syntax to IR         | IR -> ResolvedIR   
+	- Transclusion
+	- To chunk referring 
+
+[ ] Generalize IR into trait  | any type T where it's an 
+							  | IR has to be serializable to an 
+							  | output
+
+[ ] Output to HTML 
+
+-------- MILESTONE 2 ---------| entry into chunks 
+[ ] Chunks 
+	[ ] Syntax				  | pointer syntax step 2 
+		- Range queries 
+		- Interfile queries	
+		- Interfile range queries 
+
+-------- MILESTONE 3 ---------| more into chunks 
+[ ] CAS 
+	- todo! write the rest  
