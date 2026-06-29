@@ -40,3 +40,8 @@
 -------- MILESTONE 3 ---------| more into chunks 
 [ ] CAS 
 	- todo! write the rest  
+
+Notes: 
+- Idea:
+	encryption. I've read something regarding that, I think it's a great idea to keep the files in an encrypted fashion while it's not being used for security and privacy reasons.
+	even if there is a shared sudo access between users (which I find it as a common occureance in my systems where I need to share with other people) being able to write your notes and everything regarding that is a great plus. 
