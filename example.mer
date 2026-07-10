@@ -1,0 +1,42 @@
+#1 Hello from Merian! 
+
+#1.1 what is Merian?
+
+Merian is a structured functional implicitly typed document algebra language.
+Or basically, a blank canvas that happens to do computations 
+
+this is a file. 
+
+the one on the top was a statement. 
+
+the ones above me are actually two chunks. Let me get one from them. 
+
+> !&-2 /'get the second before me'/
+
+pretty cool right? 
+
+let's do something more complex.
+
+--- 
+
+:dropdown (&#0)
+
+for a function to work it has to return 2 types.
+
+```
+	:foo 
+	     > Display
+		 > IRNode 
+```
+
+each function parameter has to be an IR node, and each tail function (ie the leftmost function)
+has to return a display function, if not the IRNode will be turned into a Display node in the best 
+effort. 
+
+each function call will erase it's IR node in the tree and replace it it with what it returns. 
+
+if it's prefixed with `@` it means that it is a _pure_ function. if it's prefixed with `@?` it's an
+impure function. 
+
+A pure function can read everything but can only return one value with no side-effects.
+An impure function can read everything, return only one value but can have side-effects.  
