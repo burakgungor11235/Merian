@@ -5,23 +5,40 @@
  the need for an IR (functions / directives) and then do the IR and then come back. 
 */
 
+use merian_core::error::DummyError;
 use merian_frontend::ast::Asp;
 
+#[derive(Default)]
+/// Shared state available to every lowering backend.
+pub struct LowerContext {
+    pub diagnostics: DummyError, // for now.
 
-trait Lowerer {
-    type Output; 
-
-    const VERSION: &'static str;
-    const NAME: &'static str;
-
-    fn lower(&self, ast: &Asp) -> Result<Self::Output, Error>;
+    // Future:
+    // pub source_map: SourceMap,
+    // pub symbols: SymbolTable,
+    // pub interner: StringInterner,
+    // ...
 }
 
-trait Builder {
-    type Artifact;
 
-    fn build(
-        &mut self,
-        artifact: Self::Artifact,
-    ) -> Result<(), Error>;
+
+/// Converts one compiler representation into another.
+///
+/// A lowerer may emit diagnostics while producing an output.
+pub trait Lowerer {
+    /// Backend-specific output.
+    type Output;
+
+    /// Backend version.
+    const VERSION: &'static str;
+
+    /// Human-readable backend name.
+    const NAME: &'static str;
+
+    /// Perform lowering.
+    fn lower(
+        &self,
+        ast: &Asp,
+        ctx: &mut LowerContext,
+    ) -> Option<Self::Output>;
 }

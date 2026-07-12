@@ -1,21 +1,8 @@
 // basically, a lexer is dum. It should be dum.
 
 use logos::{Lexer, Logos, Span};
+use merian_core::span::RawSpan;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RawSpan {
-    pub start: u32,
-    pub end: u32,
-}
-
-impl From<Span> for RawSpan {
-    fn from(s: Span) -> Self {
-        Self {
-            start: s.start as u32,
-            end: s.end as u32,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpannedToken<'s> {
@@ -84,7 +71,7 @@ pub enum Token<'s> {
 
     #[regex(r"[A-Za-z][A-Za-z0-9]*(_[A-Za-z0-9]+)*")]
     Text(&'s str),
-    
+
     #[regex(r" ")]
     Whitespace,
 
@@ -97,13 +84,12 @@ pub enum Token<'s> {
     Error(String),
 }
 
-
 // Gives you all the chunks, with positionos.
 pub fn chunkify(source: &str) -> Vec<(RawSpan, &str)> {
     const SEP: &str = "\n\n";
     let mut out = Vec::new();
     let mut start = 0u32;
- 
+
     for part in source.split(SEP) {
         let end = start + part.len() as u32;
         out.push((RawSpan { start, end }, part));
@@ -120,7 +106,10 @@ pub fn lex_all<'s>(source: &'s str) -> Vec<SpannedToken<'s>> {
         let span = RawSpan::from(lexer.span());
         match result {
             Ok(token) => tokens.push(SpannedToken { token, span }),
-            Err(_) => tokens.push(SpannedToken{token: Token::Error("".into()), span}),
+            Err(_) => tokens.push(SpannedToken {
+                token: Token::Error("".into()),
+                span,
+            }),
         }
     }
     tokens
@@ -139,5 +128,4 @@ mod test {
             .iter()
             .for_each(|c| println!("{:?}\t{:?}", c.token, c.span))
     }
-
 }

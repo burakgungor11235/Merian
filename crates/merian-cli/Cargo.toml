@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+merian-core = {path = "../merian-core/"}
+merian-frontend = {path = "../merian-frontend/"}
+merian-lower = {path = "../merian-lower/"}
+merian-ir = {path = "../merian-ir"}

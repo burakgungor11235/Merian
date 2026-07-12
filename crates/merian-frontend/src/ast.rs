@@ -4,7 +4,8 @@
 // A cronyms
 // T matter
 
-use crate::lex::{RawSpan, SpannedToken, Token, chunkify, lex_all};
+use crate::lex::{SpannedToken, Token, chunkify, lex_all};
+use merian_core::span::RawSpan;
 
 // Abstract Syntax Pancake.
 pub struct Asp {
@@ -64,6 +65,10 @@ impl Asp {
         ast
     }
 
+    pub fn span_text(&self, span: RawSpan) -> &str {
+        &self.context[span.start as usize..span.end as usize]
+    }
+
     fn push_chunk(&mut self, place: RawSpan, slice: &str) {
         let toks = lex_all(slice);
         let base = place.start;
@@ -102,6 +107,10 @@ impl Asp {
     pub fn place_of(&self, chunk: usize) -> RawSpan {
         self.block_place[chunk]
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = ChunkView<'_>> {
+        (0..self.chunk_count()).map(|i| self.chunkref_nth(i))
+    }
 }
 
 fn classify_block(toks: &[SpannedToken]) -> BlockType {
@@ -137,6 +146,7 @@ fn classify_block(toks: &[SpannedToken]) -> BlockType {
         Some(_) => BlockType::Paragraph,
         None => BlockType::Unknown,
     }
+    
 }
 
 pub struct Parser<'a> {

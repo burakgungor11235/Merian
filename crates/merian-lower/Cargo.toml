@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 merian-core = {path = "../merian-core/"}
+merian-frontend = {path = "../merian-frontend/"}
