@@ -93,20 +93,34 @@ pub enum Token<'s> {
 
     #[regex(r"[\r\n|\n]")]
     Newline,
+
     Error(String),
 }
 
-/// Lexes an entire string into a Vector of tokens and spans.
+
+// Gives you all the chunks, with positionos.
+pub fn chunkify(source: &str) -> Vec<(RawSpan, &str)> {
+    const SEP: &str = "\n\n";
+    let mut out = Vec::new();
+    let mut start = 0u32;
+ 
+    for part in source.split(SEP) {
+        let end = start + part.len() as u32;
+        out.push((RawSpan { start, end }, part));
+        start = end + SEP.len() as u32;
+    }
+    out
+}
+
 /// If an error occurs, it returns the first error found.
 pub fn lex_all<'s>(source: &'s str) -> Vec<SpannedToken<'s>> {
     let mut lexer = Token::lexer(source);
     let mut tokens = Vec::new();
-
     while let Some(result) = lexer.next() {
         let span = RawSpan::from(lexer.span());
         match result {
             Ok(token) => tokens.push(SpannedToken { token, span }),
-            Err(e) => tokens.push(SpannedToken{token: Token::Error("".into()), span}),
+            Err(_) => tokens.push(SpannedToken{token: Token::Error("".into()), span}),
         }
     }
     tokens
@@ -125,4 +139,5 @@ mod test {
             .iter()
             .for_each(|c| println!("{:?}\t{:?}", c.token, c.span))
     }
+
 }
