@@ -24,4 +24,8 @@ pub enum Inline<'a> {
     Italic(Vec<Inline<'a>>),
     Strikethru(Vec<Inline<'a>>),
     Underline(Vec<Inline<'a>>),
+    Code {
+        content: &'a str,
+        lang: Option<&'a str>,
+    },
 }

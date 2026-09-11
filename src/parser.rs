@@ -58,6 +58,7 @@ impl<'a> Parser<'a> {
             token_buffer: VecDeque::new(),
         }
     }
+
     fn parse(mut self) -> Document<'a> {
         let mut blocks = Vec::new();
 
@@ -172,6 +173,7 @@ impl<'a> Parser<'a> {
 
     fn parse_inline(&mut self) -> Option<Inline<'a>> {
         match self.current {
+            // TODO: make some kind of a buffer for these.
             Some(Token::Text(text)) => {
                 self.bump();
                 Some(Inline::Text(text))
@@ -180,6 +182,51 @@ impl<'a> Parser<'a> {
             Some(Token::Whitespace(text)) => {
                 self.bump();
                 Some(Inline::Text(text))
+            }
+
+            Some(Token::LBracket) => {
+                self.bump();
+                Some(Inline::Text("["))
+            }
+
+            Some(Token::RBracket) => {
+                self.bump();
+                Some(Inline::Text("]"))
+            }
+
+            Some(Token::Backtick) => {
+                let rem = self.lexer.remainder();
+
+                if let Some(close_idx) = rem.find('`') {
+                    let content = &rem[..close_idx];
+
+                    if !content.contains("\n") {
+                        let after_code = &rem[close_idx + 1..];
+                        let mut lang = None;
+                        let mut total_skip = close_idx + 1;
+
+                        if after_code.starts_with('[')
+                            && let Some(end_bracket) = after_code.find(']')
+                        {
+                            let ident = &after_code[1..end_bracket];
+                            if !ident.is_empty() && !ident.contains(char::is_whitespace) {
+                                lang = Some(ident);
+                                total_skip += end_bracket + 1;
+                            }
+                        }
+
+                        self.lexer.bump(total_skip);
+                        self.bump();
+
+                        Some(Inline::Code { content, lang })
+                    } else {
+                        self.bump();
+                        Some(Inline::Text("`"))
+                    }
+                } else {
+                    self.bump();
+                    Some(Inline::Text("`"))
+                }
             }
 
             Some(Token::Bold) => Some(self.parse_delimited(Delimiter::Bold, Inline::Bold)),
@@ -232,9 +279,6 @@ impl<'a> Parser<'a> {
                         }
 
                         if self.open_delimiters.contains(&found) {
-                            // We hit a tag that forces an OUTER tag to close.
-                            // We abort this inner tag early, but synthesize an instruction
-                            // to reopen our tag immediately after the outer tag finishes!
                             self.token_buffer.push_front(closing.as_token());
                             break;
                         }

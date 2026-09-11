@@ -20,13 +20,22 @@ pub enum Token<'a> {
     #[token("~~")]
     Striketrhu,
 
-    #[regex(r"[^\s#*_~=]+")]
-    Text(&'a str),
+    #[token("`")]
+    Backtick,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
 
     #[regex(r"[ \t]+")]
     Whitespace(&'a str),
-}
 
+    #[regex(r"[^\s#*_~=`\[\]]+")]
+    Text(&'a str),
+
+    #[regex(r"[#*_~=]")]
+    Punctuation(&'a str),
+}
 #[cfg(test)]
 mod tests {
 
