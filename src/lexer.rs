@@ -1,13 +1,7 @@
 use logos::Logos;
 
-#[derive(Debug, PartialEq)]
-struct Heading<'a> {
-    parts: &'a str,
-    text: &'a str,
-}
-
 #[derive(Logos, Debug, PartialEq)]
-enum Token<'a> {
+pub enum Token<'a> {
     #[token("\n\n")]
     ParagraphBreak,
 
@@ -26,8 +20,11 @@ enum Token<'a> {
     #[token("~~")]
     Striketrhu,
 
-    #[regex(r"[a-zA-Z]+")]
+    #[regex(r"[^\s#*_~=]+")]
     Text(&'a str),
+
+    #[regex(r"[ \t]+")]
+    Whitespace(&'a str),
 }
 
 #[cfg(test)]

@@ -1,0 +1,256 @@
+use logos::Logos;
+use std::collections::VecDeque;
+
+use crate::{
+    ast::{Block, Document, DocumentMetadata, Inline},
+    lexer::Token,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Delimiter {
+    Bold,
+    Italic,
+    Underline,
+    Strikethru,
+}
+
+impl Delimiter {
+    fn as_token<'a>(self) -> Token<'a> {
+        match self {
+            Delimiter::Bold => Token::Bold,
+            Delimiter::Italic => Token::Italic,
+            Delimiter::Underline => Token::Underline,
+            Delimiter::Strikethru => Token::Striketrhu,
+        }
+    }
+}
+
+fn delimiter(token: &Token<'_>) -> Option<Delimiter> {
+    match token {
+        Token::Bold => Some(Delimiter::Bold),
+        Token::Italic => Some(Delimiter::Italic),
+        Token::Underline => Some(Delimiter::Underline),
+        Token::Striketrhu => Some(Delimiter::Strikethru),
+        _ => None,
+    }
+}
+
+pub struct Parser<'a> {
+    lexer: logos::Lexer<'a, Token<'a>>,
+    current: Option<Token<'a>>,
+    open_delimiters: Vec<Delimiter>,
+    token_buffer: VecDeque<Token<'a>>,
+}
+
+pub fn parse(input: &str) -> Document<'_> {
+    Parser::new(input).parse()
+}
+
+impl<'a> Parser<'a> {
+    fn new(input: &'a str) -> Self {
+        let mut lexer = Token::lexer(input);
+        let current = lexer.next().and_then(|result| result.ok());
+
+        Self {
+            lexer,
+            current,
+            open_delimiters: Vec::new(),
+            token_buffer: VecDeque::new(),
+        }
+    }
+    fn parse(mut self) -> Document<'a> {
+        let mut blocks = Vec::new();
+
+        while self.current.is_some() {
+            match self.current {
+                Some(Token::HeadingMarker(_)) => {
+                    blocks.push(self.parse_heading());
+                }
+
+                Some(Token::ParagraphBreak) | Some(Token::Newline) => {
+                    self.bump();
+                }
+
+                Some(_) => {
+                    blocks.push(self.parse_paragraph());
+                }
+
+                None => break,
+            }
+        }
+
+        Document {
+            meta: DocumentMetadata {},
+            blocks,
+        }
+    }
+
+    fn bump(&mut self) {
+        if let Some(token) = self.token_buffer.pop_front() {
+            self.current = Some(token);
+        } else {
+            self.current = self.lexer.next().and_then(|result| result.ok());
+        }
+    }
+
+    fn parse_heading(&mut self) -> Block<'a> {
+        let marker = match self.current.take() {
+            Some(Token::HeadingMarker(marker)) => marker,
+            _ => unreachable!(),
+        };
+
+        let level = marker.matches('.').count() + 1;
+
+        self.bump();
+
+        let content = self.parse_until_newline();
+
+        Block::Heading { level, content }
+    }
+
+    fn parse_paragraph(&mut self) -> Block<'a> {
+        let content = self.parse_until_paragraph_break();
+
+        Block::Paragraph(content)
+    }
+
+    fn parse_until_newline(&mut self) -> Vec<Inline<'a>> {
+        let mut result = Vec::new();
+
+        loop {
+            match self.current {
+                None | Some(Token::Newline) | Some(Token::ParagraphBreak) => {
+                    if matches!(self.current, Some(Token::Newline)) {
+                        self.bump();
+                    }
+
+                    break;
+                }
+
+                _ => {
+                    if let Some(inline) = self.parse_inline() {
+                        result.push(inline);
+                    } else {
+                        self.bump();
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    fn parse_until_paragraph_break(&mut self) -> Vec<Inline<'a>> {
+        let mut result = Vec::new();
+
+        loop {
+            match self.current {
+                None | Some(Token::ParagraphBreak) => {
+                    if matches!(self.current, Some(Token::ParagraphBreak)) {
+                        self.bump();
+                    }
+
+                    break;
+                }
+
+                Some(Token::Newline) => {
+                    self.bump();
+                }
+
+                _ => {
+                    if let Some(inline) = self.parse_inline() {
+                        result.push(inline);
+                    } else {
+                        self.bump();
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    fn parse_inline(&mut self) -> Option<Inline<'a>> {
+        match self.current {
+            Some(Token::Text(text)) => {
+                self.bump();
+                Some(Inline::Text(text))
+            }
+
+            Some(Token::Whitespace(text)) => {
+                self.bump();
+                Some(Inline::Text(text))
+            }
+
+            Some(Token::Bold) => Some(self.parse_delimited(Delimiter::Bold, Inline::Bold)),
+
+            Some(Token::Italic) => Some(self.parse_delimited(Delimiter::Italic, Inline::Italic)),
+
+            Some(Token::Underline) => {
+                Some(self.parse_delimited(Delimiter::Underline, Inline::Underline))
+            }
+
+            Some(Token::Striketrhu) => {
+                Some(self.parse_delimited(Delimiter::Strikethru, Inline::Strikethru))
+            }
+
+            _ => None,
+        }
+    }
+
+    fn parse_delimited<F>(&mut self, delimiter: Delimiter, make_inline: F) -> Inline<'a>
+    where
+        F: FnOnce(Vec<Inline<'a>>) -> Inline<'a>,
+    {
+        self.bump();
+        self.open_delimiters.push(delimiter);
+
+        let content = self.parse_delimited_content(delimiter);
+
+        self.open_delimiters.pop();
+        make_inline(content)
+    }
+
+    fn parse_delimited_content(&mut self, closing: Delimiter) -> Vec<Inline<'a>> {
+        let mut result = Vec::new();
+
+        loop {
+            match self.current {
+                None => {
+                    break;
+                }
+
+                Some(Token::Newline | Token::ParagraphBreak) => {
+                    break;
+                }
+
+                _ => {
+                    if let Some(found) = self.current.as_ref().and_then(delimiter) {
+                        if found == closing {
+                            self.bump();
+                            break;
+                        }
+
+                        if self.open_delimiters.contains(&found) {
+                            // We hit a tag that forces an OUTER tag to close.
+                            // We abort this inner tag early, but synthesize an instruction
+                            // to reopen our tag immediately after the outer tag finishes!
+                            self.token_buffer.push_front(closing.as_token());
+                            break;
+                        }
+                    }
+
+                    if let Some(inline) = self.parse_inline() {
+                        result.push(inline);
+                    } else {
+                        self.bump();
+                    }
+                }
+            }
+        }
+
+        result
+    }
+}
+
+// tested by good enough tm

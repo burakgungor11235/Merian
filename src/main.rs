@@ -1,3 +1,15 @@
+use std::io::{stdin, stdout};
+
+use crate::parser::parse;
+
+mod ast;
+mod lexer;
+mod parser;
+
 fn main() {
-    println!("Hello, world!");
+    loop {
+        let mut s = String::new();
+        let _ = stdin().read_line(&mut s);
+        println!("{:?}", parse(&s));
+    }
 }
