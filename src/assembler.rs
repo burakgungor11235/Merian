@@ -48,6 +48,21 @@ impl Assembler {
                     self.buffer.push_str("</quote>");
                 }
             }
+            Block::CodeBlock {
+                lang,
+                title,
+                content,
+            } => {
+                if let Some(t) = title {
+                    self.buffer.push_str("<p>");
+                    self.escape_html(t);
+                    self.buffer.push_str("</p>\n");
+                }
+
+                let _ = write!(self.buffer, "<pre><code class=\"code-lang-{}\">", lang);
+                self.escape_html(content);
+                self.buffer.push_str("</code></pre>");
+            }
         }
     }
 

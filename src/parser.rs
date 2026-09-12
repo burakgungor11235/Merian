@@ -83,10 +83,14 @@ impl<'a> Parser<'a> {
                 Some(Token::BiggerThan) => {
                     blocks.push(self.parse_quote());
                 }
+
+                Some(Token::CodeBlockStart) => {
+                    blocks.push(self.parse_code_block());
+                }
+
                 Some(_) => {
                     blocks.push(self.parse_paragraph());
                 }
-
                 None => break,
             }
         }
@@ -255,6 +259,88 @@ impl<'a> Parser<'a> {
         }
 
         content
+    }
+
+    fn parse_code_block(&mut self) -> Block<'a> {
+        let rem = self.lexer.remainder();
+
+        let newline_pos = rem.find('\n').unwrap_or(rem.len());
+        let header_line = &rem[..newline_pos];
+
+        let header = header_line.trim();
+
+        let (before_delim, delim) = match header.rfind('|') {
+            Some(pos) => (&header[..pos], header[pos + 1..].trim()),
+            None => (header, ""),
+        };
+
+        let (lang, title) = match before_delim.find(':') {
+            Some(pos) => {
+                let lang = before_delim[..pos].trim();
+                let title = before_delim[pos + 1..].trim();
+                (lang, if title.is_empty() { None } else { Some(title) })
+            }
+            None => (before_delim.trim(), None),
+        };
+
+        let close_tag = format!("!{}>", delim);
+
+        let after_header = if newline_pos < rem.len() {
+            &rem[newline_pos + 1..]
+        } else {
+            ""
+        };
+
+        let mut search_offset = 0;
+        let mut close_pos = None;
+
+        while let Some(idx) = after_header[search_offset..].find(&close_tag) {
+            let absolute_idx = search_offset + idx;
+            let at_line_start =
+                absolute_idx == 0 || after_header.as_bytes()[absolute_idx - 1] == b'\n';
+            if at_line_start {
+                close_pos = Some(absolute_idx);
+                break;
+            } else {
+                search_offset = absolute_idx + close_tag.len();
+            }
+        }
+
+        let (content, total_skip) = if let Some(idx) = close_pos {
+            let raw_content = &after_header[..idx];
+            let content = if let Some(s) = raw_content.strip_suffix("\r\n") {
+                s
+            } else if let Some(s) = raw_content.strip_suffix('\n') {
+                s
+            } else {
+                raw_content
+            };
+
+            let mut skip = newline_pos + 1 + idx + close_tag.len();
+
+            // Skip trailing newline after `!END>` if present
+            // if not, hell will break loose.
+            let after_close = &rem[skip..];
+            if after_close.starts_with("\r\n") {
+                skip += 2;
+            } else if after_close.starts_with('\n') {
+                skip += 1;
+            }
+
+            (content, skip)
+        } else {
+            // Unclosed code block, consume to EOF
+            (after_header, rem.len())
+        };
+
+        self.lexer.bump(total_skip);
+        self.bump();
+
+        Block::CodeBlock {
+            lang,
+            title,
+            content,
+        }
     }
 
     fn parse_inline(&mut self) -> Option<Inline<'a>> {

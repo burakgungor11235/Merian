@@ -18,6 +18,11 @@ pub enum Block<'a> {
         level: i32,
         content: Vec<Block<'a>>,
     },
+    CodeBlock {
+        lang: &'a str,
+        title: Option<&'a str>,
+        content: &'a str,
+    },
 }
 
 #[derive(Debug)]
