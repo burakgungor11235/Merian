@@ -36,8 +36,14 @@ pub enum Token<'a> {
     #[regex(r"[ \t]+")]
     Whitespace(&'a str),
 
+    #[token(">")]
+    BiggerThan,
+
+    #[token("<")]
+    SmallerThan,
+
     // ON GOD THIS THING IS GOING TO BE HUGE AT THE END OF THIS. MY HEAD IS HURTING.
-    #[regex(r"[^\s#*_~=`\[\]/']+")]
+    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>]+"#)]
     Text(&'a str),
 
     #[regex(r"[#*_~=]")]

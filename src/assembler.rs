@@ -38,6 +38,16 @@ impl Assembler {
                 self.render_inlines(content);
                 self.buffer.push_str("</p>");
             }
+            Block::Quote { level, content } => {
+                for _ in 0..*level {
+                    self.buffer.push_str("<quote>");
+                }
+                content.iter().for_each(|b| self.render_block(b));
+
+                for _ in 0..*level {
+                    self.buffer.push_str("</quote>");
+                }
+            }
         }
     }
 

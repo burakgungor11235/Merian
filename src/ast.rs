@@ -14,6 +14,10 @@ pub enum Block<'a> {
         content: Vec<Inline<'a>>,
     },
     Paragraph(Vec<Inline<'a>>),
+    Quote {
+        level: i32,
+        content: Vec<Block<'a>>,
+    },
 }
 
 #[derive(Debug)]

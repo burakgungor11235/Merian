@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use crate::{
     ast::{Block, Document, DocumentMetadata, Inline},
-    lexer::Token::{self, CommentEnd},
+    lexer::Token::{self, BiggerThan, CommentEnd},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,11 +60,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse(mut self) -> Document<'a> {
+        Document {
+            meta: DocumentMetadata {},
+            blocks: self.parse_blocks(),
+        }
+    }
+
+    fn parse_blocks(&mut self) -> Vec<Block<'a>> {
         let mut blocks = Vec::new();
 
         while self.current.is_some() {
             match self.current {
                 Some(Token::HeadingMarker(_)) => {
+                    print!("seen heading");
                     blocks.push(self.parse_heading());
                 }
 
@@ -72,6 +80,9 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
 
+                Some(Token::BiggerThan) => {
+                    blocks.push(self.parse_quote());
+                }
                 Some(_) => {
                     blocks.push(self.parse_paragraph());
                 }
@@ -79,11 +90,7 @@ impl<'a> Parser<'a> {
                 None => break,
             }
         }
-
-        Document {
-            meta: DocumentMetadata {},
-            blocks,
-        }
+        blocks
     }
 
     fn bump(&mut self) {
@@ -179,6 +186,75 @@ impl<'a> Parser<'a> {
         }
 
         result
+    }
+    fn parse_quote(&mut self) -> Block<'a> {
+        let mut level = 0;
+
+        while let Some(BiggerThan) = self.current {
+            level += 1;
+            self.bump();
+        }
+
+        if matches!(self.current, Some(Token::Whitespace(_))) {
+            self.bump();
+        }
+
+        Block::Quote {
+            level,
+            content: self.parse_quote_content(level),
+        }
+    }
+
+    fn parse_quote_content(&mut self, level: i32) -> Vec<Block<'a>> {
+        let mut content = Vec::new();
+
+        loop {
+            match self.current {
+                None => break,
+
+                Some(Token::ParagraphBreak) => {
+                    break;
+                }
+
+                Some(Token::Newline) => {
+                    self.bump();
+                }
+
+                Some(Token::BiggerThan) => {
+                    let mut new_level = 0;
+
+                    while let Some(Token::BiggerThan) = self.current {
+                        new_level += 1;
+                        self.bump();
+                    }
+
+                    if matches!(self.current, Some(Token::Whitespace(_))) {
+                        self.bump();
+                    }
+
+                    if new_level > level {
+                        content.push(Block::Quote {
+                            level: new_level,
+                            content: self.parse_quote_content(new_level),
+                        });
+                    } else if new_level == level {
+                        content.push(Block::Paragraph(self.parse_until_newline()));
+                    } else {
+                        for _ in 0..new_level {
+                            self.token_buffer.push_front(Token::BiggerThan);
+                        }
+
+                        break;
+                    }
+                }
+
+                _ => {
+                    content.push(Block::Paragraph(self.parse_until_newline()));
+                }
+            }
+        }
+
+        content
     }
 
     fn parse_inline(&mut self) -> Option<Inline<'a>> {
