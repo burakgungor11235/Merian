@@ -2,8 +2,10 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
+use crate::lexer::Token;
 use crate::{assembler::Assembler, parser::parse};
 use clap::Parser;
+use logos::Logos;
 
 mod assembler;
 mod ast;
@@ -22,6 +24,10 @@ struct Cli {
     /// Dump the Abstract Syntax Tree (AST) for debugging purposes
     #[arg(long = "dump-ast")]
     dump_ast: bool,
+
+    /// Dump tokens
+    #[arg(long = "dump-tokens")]
+    dump_tokens: bool,
 }
 
 fn main() {
@@ -37,6 +43,14 @@ fn main() {
     });
 
     let doc = parse(&source);
+    if cli.dump_tokens {
+        println!(
+            "{:#?}",
+            Token::lexer(&source)
+                .map(|f| format!("{:?}", (f).unwrap()))
+                .collect::<Vec<String>>()
+        );
+    }
     if cli.dump_ast {
         println!("{:#?}", doc);
         return;

@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 use crate::{
     ast::{Block, Document, DocumentMetadata, Inline},
-    lexer::Token,
+    lexer::Token::{self, CommentEnd},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,7 +140,17 @@ impl<'a> Parser<'a> {
 
         result
     }
-
+    /// skip comments, set current pos to comment + 1
+    fn skip_comments(&mut self) {
+        println!("{:?}", self.current);
+        while self.current.is_some() && self.current != Some(Token::CommentEnd) {
+            println!("{:?}", self.current);
+            self.bump();
+        }
+        if self.current == Some(CommentEnd) {
+            self.bump();
+        }
+    }
     fn parse_until_paragraph_break(&mut self) -> Vec<Inline<'a>> {
         let mut result = Vec::new();
 
@@ -193,7 +203,16 @@ impl<'a> Parser<'a> {
                 self.bump();
                 Some(Inline::Text("]"))
             }
+            Some(Token::CommentStart) => {
+                println!("{:?}", self.current);
 
+                self.skip_comments(); // I can deffinelty find a better way to do this
+                Some(Inline::Text(""))
+            }
+            Some(Token::CommentEnd) => {
+                self.bump();
+                Some(Inline::Text("'/"))
+            }
             Some(Token::Backtick) => {
                 let rem = self.lexer.remainder();
 
@@ -296,5 +315,4 @@ impl<'a> Parser<'a> {
         result
     }
 }
-
 // tested by good enough tm

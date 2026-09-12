@@ -20,6 +20,12 @@ pub enum Token<'a> {
     #[token("~~")]
     Striketrhu,
 
+    #[token("/'")]
+    CommentStart,
+
+    #[token("'/")]
+    CommentEnd,
+
     #[token("`")]
     Backtick,
     #[token("[")]
@@ -30,7 +36,8 @@ pub enum Token<'a> {
     #[regex(r"[ \t]+")]
     Whitespace(&'a str),
 
-    #[regex(r"[^\s#*_~=`\[\]]+")]
+    // ON GOD THIS THING IS GOING TO BE HUGE AT THE END OF THIS. MY HEAD IS HURTING.
+    #[regex(r"[^\s#*_~=`\[\]/']+")]
     Text(&'a str),
 
     #[regex(r"[#*_~=]")]
