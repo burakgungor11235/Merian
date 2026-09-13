@@ -167,9 +167,7 @@ impl ListCounter {
             });
         }
 
-        if depth == 1 {
-            formatted.push('.');
-        }
+        formatted.push('.');
 
         (depth, formatted)
     }
@@ -362,6 +360,39 @@ impl<'a> Parser<'a> {
         };
 
         let rem = self.lexer.remainder();
+
+        /*
+        NOTICE TO DEVELOPERS:
+
+        Now here might lead to a bug:
+
+        * elem
+        ** sub elem
+        *** sub-sub elem
+
+        This could technically be parsed as a:
+
+        ul depth 1
+        ul depth 2
+        ul depth 3
+
+        but it isn't because
+
+        literal `*` is Token::Star
+
+        and
+
+        literal `**` is Token::Bold
+
+        Now I don't want to disallow
+
+        ** bold paragraph bla bla bla bla bla ... **
+
+        so I'm keeping it in this way so that it "technically" has the
+        capability to do it like that but lexer disallows it from doing it.
+
+        I have no fancy conceptual reasons to disallow deeper bullet lists, it's a language limitation.
+        */
         let extra = rem.chars().take_while(|&c| c == marker).count();
         let after = &rem[extra..];
 
