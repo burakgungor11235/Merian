@@ -42,14 +42,36 @@ pub enum Token<'a> {
     #[token("<")]
     SmallerThan,
 
+    // *insert joke here.
+    #[token("|", priority = 20)]
+    Pipe,
+
+    #[token("+")]
+    Plus,
+
+    #[token("-")]
+    Minus,
+
+    #[token("^")]
+    Caret,
+
+    #[token("=")]
+    Equals,
+
+    #[token(".")]
+    Dot,
+
+    #[token("*")]
+    Star,
+
     #[token("<!")]
     CodeBlockStart,
 
     // ON GOD THIS THING IS GOING TO BE HUGE AT THE END OF THIS. MY HEAD IS HURTING.
-    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>]+"#)]
+    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>|+^.=-]+"#)]
     Text(&'a str),
 
-    #[regex(r"[#*_~=]")]
+    #[regex(r"[#_~/']")]
     Punctuation(&'a str),
 }
 #[cfg(test)]

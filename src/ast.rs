@@ -23,8 +23,17 @@ pub enum Block<'a> {
         title: Option<&'a str>,
         content: &'a str,
     },
+    List {
+        items: Vec<ListItem<'a>>,
+    },
 }
 
+#[derive(Debug)]
+pub struct ListItem<'a> {
+    pub depth: usize,
+    pub marker: String, // promote this to an enum in the future.
+    pub blocks: Vec<Block<'a>>,
+}
 #[derive(Debug)]
 pub enum Inline<'a> {
     Text(&'a str),

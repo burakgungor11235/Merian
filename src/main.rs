@@ -47,7 +47,7 @@ fn main() {
         println!(
             "{:#?}",
             Token::lexer(&source)
-                .map(|f| format!("{:?}", (f).unwrap()))
+                .map(|f| format!("{:?}", (f)))
                 .collect::<Vec<String>>()
         );
     }

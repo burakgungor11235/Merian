@@ -2,8 +2,8 @@ use logos::Logos;
 use std::collections::VecDeque;
 
 use crate::{
-    ast::{Block, Document, DocumentMetadata, Inline},
-    lexer::Token::{self, BiggerThan, CommentEnd},
+    ast::{Block, Document, DocumentMetadata, Inline, ListItem},
+    lexer::Token::{self, CommentEnd},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,11 +35,164 @@ fn delimiter(token: &Token<'_>) -> Option<Delimiter> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoSymbol {
+    Numeric,    // '+'
+    LowerAlpha, // '-'
+    UpperAlpha, // '^'
+    Roman,      // '='
+}
+
+impl AutoSymbol {
+    fn from_char(c: char) -> Option<Self> {
+        match c {
+            '+' => Some(Self::Numeric),
+            '-' => Some(Self::LowerAlpha),
+            '^' => Some(Self::UpperAlpha),
+            '=' => Some(Self::Roman),
+            _ => None,
+        }
+    }
+}
+
+fn to_lower_alpha(mut n: usize) -> String {
+    let mut s = String::new();
+    while n > 0 {
+        n -= 1;
+        s.push((b'a' + (n % 26) as u8) as char);
+        n /= 26;
+    }
+    s.chars().rev().collect()
+}
+
+fn to_upper_alpha(n: usize) -> String {
+    to_lower_alpha(n).to_uppercase()
+}
+
+fn to_roman(mut n: usize) -> String {
+    let table = [
+        (1000, "m"),
+        (900, "cm"),
+        (500, "d"),
+        (400, "cd"),
+        (100, "c"),
+        (90, "xc"),
+        (50, "l"),
+        (40, "xl"),
+        (10, "x"),
+        (9, "ix"),
+        (5, "v"),
+        (4, "iv"),
+        (1, "i"),
+    ];
+    let mut s = String::new();
+    for &(val, sym) in &table {
+        while n >= val {
+            s.push_str(sym);
+            n -= val;
+        }
+    }
+    s
+}
+
+struct ListCounter {
+    stack: Vec<(AutoSymbol, usize)>,
+}
+
+impl ListCounter {
+    fn new() -> Self {
+        Self { stack: Vec::new() }
+    }
+
+    fn reset(&mut self) {
+        self.stack.clear();
+    }
+
+    fn explicit(&mut self, num: usize) -> (usize, String) {
+        if self.stack.is_empty() {
+            self.stack.push((AutoSymbol::Numeric, num));
+        } else {
+            self.stack.truncate(1);
+            self.stack[0] = (AutoSymbol::Numeric, num);
+        }
+        (1, format!("{num}."))
+    }
+
+    fn auto(&mut self, symbols: &[AutoSymbol]) -> (usize, String) {
+        let depth = symbols.len().max(1);
+
+        if depth < self.stack.len() {
+            self.stack.truncate(depth);
+        }
+
+        for i in 0..depth.saturating_sub(1) {
+            let sym = symbols.get(i).copied().unwrap_or(AutoSymbol::Numeric);
+            if i < self.stack.len() {
+                if self.stack[i].0 != sym {
+                    self.stack[i] = (sym, 1);
+                }
+            } else {
+                self.stack.push((sym, 1));
+            }
+        }
+
+        let last_idx = depth - 1;
+        let target_sym = symbols
+            .get(last_idx)
+            .copied()
+            .unwrap_or(AutoSymbol::Numeric);
+
+        if last_idx < self.stack.len() {
+            if self.stack[last_idx].0 == target_sym {
+                self.stack[last_idx].1 += 1;
+            } else {
+                // Symbol changed at same depth
+                self.stack[last_idx] = (target_sym, 1);
+            }
+        } else {
+            self.stack.push((target_sym, 1));
+        }
+
+        let mut formatted = String::new();
+        for (i, (symbol, count)) in self.stack.iter().enumerate() {
+            if i > 0 {
+                formatted.push('.');
+            }
+
+            formatted.push_str(&match symbol {
+                AutoSymbol::Numeric => count.to_string(),
+                AutoSymbol::LowerAlpha => to_lower_alpha(*count),
+                AutoSymbol::UpperAlpha => to_upper_alpha(*count),
+                AutoSymbol::Roman => to_roman(*count),
+            });
+        }
+
+        if depth == 1 {
+            formatted.push('.');
+        }
+
+        (depth, formatted)
+    }
+}
+fn is_text_token(token: &Token<'_>) -> bool {
+    !matches!(
+        token,
+        Token::Bold
+            | Token::Italic
+            | Token::Underline
+            | Token::Striketrhu
+            | Token::Backtick
+            | Token::CommentStart
+            | Token::Newline
+            | Token::ParagraphBreak // add tokens that shouldn't be treated as text.
+    )
+}
 pub struct Parser<'a> {
     lexer: logos::Lexer<'a, Token<'a>>,
     current: Option<Token<'a>>,
     open_delimiters: Vec<Delimiter>,
     token_buffer: VecDeque<Token<'a>>,
+    list_counter: ListCounter,
 }
 
 pub fn parse(input: &str) -> Document<'_> {
@@ -56,6 +209,7 @@ impl<'a> Parser<'a> {
             current,
             open_delimiters: Vec::new(),
             token_buffer: VecDeque::new(),
+            list_counter: ListCounter::new(),
         }
     }
 
@@ -70,31 +224,41 @@ impl<'a> Parser<'a> {
         let mut blocks = Vec::new();
 
         while self.current.is_some() {
-            match self.current {
-                Some(Token::HeadingMarker(_)) => {
-                    print!("seen heading");
-                    blocks.push(self.parse_heading());
-                }
-
-                Some(Token::ParagraphBreak) | Some(Token::Newline) => {
-                    self.bump();
-                }
-
-                Some(Token::BiggerThan) => {
-                    blocks.push(self.parse_quote());
-                }
-
-                Some(Token::CodeBlockStart) => {
-                    blocks.push(self.parse_code_block());
-                }
-
-                Some(_) => {
-                    blocks.push(self.parse_paragraph());
-                }
-                None => break,
+            if let Some(block) = self.parse_block() {
+                blocks.push(block);
             }
         }
+
         blocks
+    }
+    fn parse_block(&mut self) -> Option<Block<'a>> {
+        if let Some((depth, label)) = self.try_parse_list_marker() {
+            return Some(self.parse_list_with(depth, label));
+        }
+
+        match self.current {
+            Some(Token::HeadingMarker(_)) => {
+                self.list_counter.reset(); // New section resets list counters
+                Some(self.parse_heading())
+            }
+            Some(Token::BiggerThan) => Some(self.parse_quote()),
+            Some(Token::CodeBlockStart) => Some(self.parse_code_block()),
+            Some(Token::Newline | Token::ParagraphBreak) => {
+                self.bump();
+                None
+            }
+            Some(_) => {
+                let p = self.parse_paragraph();
+                if let Block::Paragraph(ref inlines) = p
+                    && inlines.is_empty()
+                {
+                    return None;
+                }
+
+                Some(p)
+            }
+            None => None,
+        }
     }
 
     fn bump(&mut self) {
@@ -114,6 +278,7 @@ impl<'a> Parser<'a> {
         let level = marker.matches('.').count() + 1;
 
         self.bump();
+        self.skip_whitespace();
 
         let content = self.parse_until_newline();
 
@@ -125,7 +290,270 @@ impl<'a> Parser<'a> {
 
         Block::Paragraph(content)
     }
+    fn skip_whitespace(&mut self) {
+        if matches!(self.current, Some(Token::Whitespace(_))) {
+            self.bump();
+        }
+    }
+    fn try_parse_list_marker(&mut self) -> Option<(usize, String)> {
+        let mut skipped_toks = Vec::new();
 
+        while matches!(self.current, Some(Token::Whitespace(_))) {
+            skipped_toks.push(self.current.take().unwrap());
+            self.bump();
+        }
+
+        while self.current == Some(Token::BiggerThan) {
+            skipped_toks.push(self.current.take().unwrap());
+            self.bump();
+
+            while matches!(self.current, Some(Token::Whitespace(_))) {
+                skipped_toks.push(self.current.take().unwrap());
+                self.bump();
+            }
+        }
+
+        let res = self
+            .try_parse_explicit_list()
+            .or_else(|| self.try_parse_unordered_list())
+            .or_else(|| self.try_parse_auto_list());
+
+        if res.is_none() {
+            // Backtrack the quote and whitespace markers if it wasn't a list item
+            if !skipped_toks.is_empty() {
+                if let Some(tok) = self.current.take() {
+                    self.token_buffer.push_front(tok);
+                }
+                while let Some(tok) = skipped_toks.pop() {
+                    self.token_buffer.push_front(tok);
+                }
+                self.current = self.token_buffer.pop_front();
+            }
+        }
+
+        res
+    }
+    fn try_parse_explicit_list(&mut self) -> Option<(usize, String)> {
+        let Some(Token::Text(digits)) = self.current else {
+            return None;
+        };
+
+        let Ok(num) = digits.parse::<usize>() else {
+            return None;
+        };
+
+        let rem = self.lexer.remainder();
+
+        if !rem.starts_with('.') || !rem[1..].starts_with([' ', '\t']) {
+            return None;
+        }
+
+        self.bump();
+        self.bump();
+        self.skip_whitespace();
+
+        Some(self.list_counter.explicit(num))
+    }
+    fn try_parse_unordered_list(&mut self) -> Option<(usize, String)> {
+        let marker = match self.current {
+            Some(Token::Minus) => '-',
+            Some(Token::Star) => '*',
+            _ => return None,
+        };
+
+        let rem = self.lexer.remainder();
+        let extra = rem.chars().take_while(|&c| c == marker).count();
+        let after = &rem[extra..];
+
+        if !after.starts_with([' ', '\t']) {
+            return None;
+        }
+
+        self.lexer.bump(extra);
+        self.bump();
+        self.skip_whitespace();
+
+        Some((extra + 1, marker.to_string()))
+    }
+    fn try_parse_auto_list(&mut self) -> Option<(usize, String)> {
+        let symbol = match self.current {
+            Some(Token::Plus) => AutoSymbol::Numeric,
+            Some(Token::Minus) => AutoSymbol::LowerAlpha,
+            Some(Token::Caret) => AutoSymbol::UpperAlpha,
+            Some(Token::Equals) => AutoSymbol::Roman,
+            _ => return None,
+        };
+
+        let rem = self.lexer.remainder();
+
+        if rem.starts_with([' ', '\t']) {
+            self.bump();
+            self.skip_whitespace();
+
+            return Some(self.list_counter.auto(&[symbol]));
+        }
+
+        self.try_parse_nested_auto_list(symbol)
+    }
+    fn try_parse_nested_auto_list(&mut self, first: AutoSymbol) -> Option<(usize, String)> {
+        let rem = self.lexer.remainder();
+
+        if !rem.starts_with('.') {
+            return None;
+        }
+
+        let ws_idx = rem.find([' ', '\t', '\n'])?;
+        let pattern = &rem[..ws_idx];
+
+        if !pattern
+            .chars()
+            .all(|c| matches!(c, '.' | '+' | '-' | '^' | '='))
+        {
+            return None;
+        }
+
+        let mut symbols = vec![first];
+
+        for c in pattern.chars() {
+            if let Some(sym) = AutoSymbol::from_char(c) {
+                symbols.push(sym);
+            }
+        }
+
+        self.lexer.bump(ws_idx);
+        self.bump();
+        self.skip_whitespace();
+
+        Some(self.list_counter.auto(&symbols))
+    }
+
+    fn parse_list_with(&mut self, first_depth: usize, first_label: String) -> Block<'a> {
+        let mut items = Vec::new();
+
+        let first_para = Block::Paragraph(self.parse_until_newline());
+        let mut item_blocks = vec![first_para];
+        self.parse_gutter_blocks(&mut item_blocks);
+
+        items.push(ListItem {
+            depth: first_depth,
+            marker: first_label,
+            blocks: item_blocks,
+        });
+
+        while self.current.is_some() {
+            while matches!(self.current, Some(Token::Newline)) {
+                self.bump();
+            }
+
+            if self.current == Some(Token::ParagraphBreak) {
+                let rem = self
+                    .lexer
+                    .remainder()
+                    .trim_start_matches([' ', '\t', '\r', '\n', '>']);
+                if rem.starts_with('+')
+                    || rem.starts_with('-')
+                    || rem.starts_with('^')
+                    || rem.starts_with('=')
+                    || rem
+                        .as_bytes()
+                        .first()
+                        .map_or_else(|| false, |b| b.is_ascii_digit())
+                {
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+
+            self.skip_whitespace();
+
+            if matches!(self.current, Some(Token::Whitespace(_))) {
+                self.bump();
+            }
+
+            if let Some((depth, label)) = self.try_parse_list_marker() {
+                let first_para = Block::Paragraph(self.parse_until_newline());
+                let mut item_blocks = vec![first_para];
+                self.parse_gutter_blocks(&mut item_blocks);
+
+                items.push(ListItem {
+                    depth,
+                    marker: label,
+                    blocks: item_blocks,
+                });
+            } else {
+                break;
+            }
+        }
+
+        Block::List { items }
+    }
+
+    fn parse_gutter_blocks(&mut self, item_blocks: &mut Vec<Block<'a>>) {
+        while self.try_consume_gutter_prefix() {
+            self.bump(); // consume `|`
+            self.skip_whitespace();
+
+            match self.current {
+                Some(Token::CodeBlockStart) => {
+                    item_blocks.push(self.parse_code_block());
+                }
+                Some(Token::BiggerThan) => {
+                    item_blocks.push(self.parse_quote());
+                }
+                Some(Token::Newline | Token::ParagraphBreak) => {
+                    self.bump();
+                }
+                Some(_) => {
+                    let inlines = self.parse_until_newline();
+                    if !inlines.is_empty() {
+                        item_blocks.push(Block::Paragraph(inlines));
+                    }
+                }
+                None => break,
+            }
+        }
+    }
+
+    fn try_consume_gutter_prefix(&mut self) -> bool {
+        let mut skipped = Vec::new();
+
+        if self.current == Some(Token::Newline) {
+            skipped.push(self.current.take().unwrap());
+            self.bump();
+        }
+
+        if self.current == Some(Token::ParagraphBreak) {
+            skipped.push(self.current.take().unwrap());
+            self.bump();
+        }
+
+        while self.current == Some(Token::BiggerThan) {
+            skipped.push(self.current.take().unwrap());
+            self.bump();
+        }
+
+        if matches!(self.current, Some(Token::Whitespace(_))) {
+            skipped.push(self.current.take().unwrap());
+            self.bump();
+        }
+
+        if self.current == Some(Token::Pipe) {
+            return true;
+        }
+
+        if !skipped.is_empty() {
+            if let Some(tok) = self.current.take() {
+                self.token_buffer.push_front(tok);
+            }
+            while let Some(tok) = skipped.pop() {
+                self.token_buffer.push_front(tok);
+            }
+            self.current = self.token_buffer.pop_front();
+        }
+
+        false
+    }
     fn parse_until_newline(&mut self) -> Vec<Inline<'a>> {
         let mut result = Vec::new();
 
@@ -162,6 +590,136 @@ impl<'a> Parser<'a> {
             self.bump();
         }
     }
+
+    fn is_at_block_boundary(&self) -> bool {
+        match self.current {
+            Some(Token::HeadingMarker(_))
+            | Some(Token::CodeBlockStart)
+            | Some(Token::BiggerThan)
+            | Some(Token::Pipe) => true,
+
+            Some(Token::Plus | Token::Caret | Token::Equals) => {
+                let rem = self.lexer.remainder();
+                rem.starts_with([' ', '\t', '.'])
+            }
+
+            Some(Token::Minus) => {
+                let rem = self.lexer.remainder();
+                rem.starts_with([' ', '\t', '.', '-'])
+            }
+
+            Some(Token::Text(digits)) if digits.chars().all(|c| c.is_ascii_digit()) => {
+                let rem = self.lexer.remainder();
+                rem.starts_with('.') && rem[1..].starts_with([' ', '\t'])
+            }
+
+            Some(Token::Whitespace(_)) => {
+                let rem = self.lexer.remainder().trim_start_matches([' ', '\t', '>']);
+                rem.starts_with('|')
+                    || rem.starts_with("+ ")
+                    || rem.starts_with("+.")
+                    || rem.starts_with("- ")
+                    || rem.starts_with("-.")
+                    || rem.starts_with("--")
+                    || rem.starts_with("^.")
+                    || rem.starts_with("=.")
+                    || (rem
+                        .as_bytes()
+                        .first()
+                        .map_or_else(|| false, |b| b.is_ascii_digit())
+                        && rem.contains('.'))
+            }
+
+            _ => false,
+        }
+    }
+    fn parse_quote(&mut self) -> Block<'a> {
+        let level = self.consume_quote_prefix();
+        let mut content = Vec::new();
+
+        let inlines = self.parse_until_newline();
+        if !inlines.is_empty() {
+            content.push(Block::Paragraph(inlines));
+        }
+
+        loop {
+            if self.current == Some(Token::BiggerThan) {
+                let mut skipped = Vec::new();
+                let mut ws_skipped = Vec::new();
+
+                while self.current == Some(Token::BiggerThan) {
+                    skipped.push(self.current.take().unwrap());
+                    self.bump();
+                }
+
+                while matches!(self.current, Some(Token::Whitespace(_))) {
+                    ws_skipped.push(self.current.take().unwrap());
+                    self.bump();
+                }
+
+                let next_level = skipped.len() as i32;
+
+                let is_interrupting_boundary =
+                    self.is_at_block_boundary() && self.current != Some(Token::BiggerThan);
+
+                // If the quote detects an embedded logic block (e.g. list, gutters), yield parsing
+                if next_level >= level && is_interrupting_boundary {
+                    if let Some(tok) = self.current.take() {
+                        self.token_buffer.push_front(tok);
+                    }
+                    while let Some(tok) = ws_skipped.pop() {
+                        self.token_buffer.push_front(tok);
+                    }
+                    while let Some(tok) = skipped.pop() {
+                        self.token_buffer.push_front(tok);
+                    }
+                    self.current = self.token_buffer.pop_front();
+                    break;
+                }
+
+                if next_level == level {
+                    let inlines = self.parse_until_newline();
+                    if !inlines.is_empty() {
+                        content.push(Block::Paragraph(inlines));
+                    }
+                } else if next_level > level {
+                    let inlines = self.parse_until_newline();
+                    if !inlines.is_empty() {
+                        content.push(Block::Quote {
+                            level: next_level,
+                            content: vec![Block::Paragraph(inlines)],
+                        });
+                    }
+                } else {
+                    if let Some(tok) = self.current.take() {
+                        self.token_buffer.push_front(tok);
+                    }
+                    while let Some(tok) = ws_skipped.pop() {
+                        self.token_buffer.push_front(tok);
+                    }
+                    while let Some(tok) = skipped.pop() {
+                        self.token_buffer.push_front(tok);
+                    }
+                    self.current = self.token_buffer.pop_front();
+                    break;
+                }
+            } else if self.current == Some(Token::Pipe) {
+                let rem = self.lexer.remainder().trim_start_matches([' ', '\t']);
+                if rem.starts_with('>') {
+                    self.bump(); // consume `|`
+                    self.skip_whitespace();
+                    continue;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        Block::Quote { level, content }
+    }
+
     fn parse_until_paragraph_break(&mut self) -> Vec<Inline<'a>> {
         let mut result = Vec::new();
 
@@ -171,12 +729,15 @@ impl<'a> Parser<'a> {
                     if matches!(self.current, Some(Token::ParagraphBreak)) {
                         self.bump();
                     }
-
                     break;
                 }
 
                 Some(Token::Newline) => {
                     self.bump();
+
+                    if self.is_at_block_boundary() {
+                        break;
+                    }
                 }
 
                 _ => {
@@ -191,74 +752,16 @@ impl<'a> Parser<'a> {
 
         result
     }
-    fn parse_quote(&mut self) -> Block<'a> {
+    fn consume_quote_prefix(&mut self) -> i32 {
         let mut level = 0;
 
-        while let Some(BiggerThan) = self.current {
+        while self.current == Some(Token::BiggerThan) {
             level += 1;
             self.bump();
         }
 
-        if matches!(self.current, Some(Token::Whitespace(_))) {
-            self.bump();
-        }
-
-        Block::Quote {
-            level,
-            content: self.parse_quote_content(level),
-        }
-    }
-
-    fn parse_quote_content(&mut self, level: i32) -> Vec<Block<'a>> {
-        let mut content = Vec::new();
-
-        loop {
-            match self.current {
-                None => break,
-
-                Some(Token::ParagraphBreak) => {
-                    break;
-                }
-
-                Some(Token::Newline) => {
-                    self.bump();
-                }
-
-                Some(Token::BiggerThan) => {
-                    let mut new_level = 0;
-
-                    while let Some(Token::BiggerThan) = self.current {
-                        new_level += 1;
-                        self.bump();
-                    }
-
-                    if matches!(self.current, Some(Token::Whitespace(_))) {
-                        self.bump();
-                    }
-
-                    if new_level > level {
-                        content.push(Block::Quote {
-                            level: new_level,
-                            content: self.parse_quote_content(new_level),
-                        });
-                    } else if new_level == level {
-                        content.push(Block::Paragraph(self.parse_until_newline()));
-                    } else {
-                        for _ in 0..new_level {
-                            self.token_buffer.push_front(Token::BiggerThan);
-                        }
-
-                        break;
-                    }
-                }
-
-                _ => {
-                    content.push(Block::Paragraph(self.parse_until_newline()));
-                }
-            }
-        }
-
-        content
+        self.skip_whitespace();
+        level
     }
 
     fn parse_code_block(&mut self) -> Block<'a> {
@@ -266,7 +769,6 @@ impl<'a> Parser<'a> {
 
         let newline_pos = rem.find('\n').unwrap_or(rem.len());
         let header_line = &rem[..newline_pos];
-
         let header = header_line.trim();
 
         let (before_delim, delim) = match header.rfind('|') {
@@ -296,18 +798,22 @@ impl<'a> Parser<'a> {
 
         while let Some(idx) = after_header[search_offset..].find(&close_tag) {
             let absolute_idx = search_offset + idx;
-            let at_line_start =
-                absolute_idx == 0 || after_header.as_bytes()[absolute_idx - 1] == b'\n';
+            let before = &after_header[..absolute_idx];
+
+            let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
+
+            let at_line_start = before[line_start..].chars().all(|c| c == ' ' || c == '\t');
+
             if at_line_start {
-                close_pos = Some(absolute_idx);
+                close_pos = Some((line_start, absolute_idx));
                 break;
             } else {
                 search_offset = absolute_idx + close_tag.len();
             }
         }
 
-        let (content, total_skip) = if let Some(idx) = close_pos {
-            let raw_content = &after_header[..idx];
+        let (content, total_skip) = if let Some((line_start, absolute_idx)) = close_pos {
+            let raw_content = &after_header[..line_start];
             let content = if let Some(s) = raw_content.strip_suffix("\r\n") {
                 s
             } else if let Some(s) = raw_content.strip_suffix('\n') {
@@ -316,10 +822,8 @@ impl<'a> Parser<'a> {
                 raw_content
             };
 
-            let mut skip = newline_pos + 1 + idx + close_tag.len();
+            let mut skip = newline_pos + 1 + absolute_idx + close_tag.len();
 
-            // Skip trailing newline after `!END>` if present
-            // if not, hell will break loose.
             let after_close = &rem[skip..];
             if after_close.starts_with("\r\n") {
                 skip += 2;
@@ -329,7 +833,6 @@ impl<'a> Parser<'a> {
 
             (content, skip)
         } else {
-            // Unclosed code block, consume to EOF
             (after_header, rem.len())
         };
 
@@ -343,81 +846,74 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_inline(&mut self) -> Option<Inline<'a>> {
-        match self.current {
-            // TODO: make some kind of a buffer for these.
-            Some(Token::Text(text)) => {
-                self.bump();
-                Some(Inline::Text(text))
-            }
+    fn parse_inline_code(&mut self) -> Option<Inline<'a>> {
+        let rem = self.lexer.remainder();
 
-            Some(Token::Whitespace(text)) => {
-                self.bump();
-                Some(Inline::Text(text))
-            }
+        if let Some(close_idx) = rem.find('`') {
+            let content = &rem[..close_idx];
 
-            Some(Token::LBracket) => {
-                self.bump();
-                Some(Inline::Text("["))
-            }
+            if !content.contains("\n") {
+                let after_code = &rem[close_idx + 1..];
+                let mut lang = None;
+                let mut total_skip = close_idx + 1;
 
-            Some(Token::RBracket) => {
-                self.bump();
-                Some(Inline::Text("]"))
-            }
-            Some(Token::CommentStart) => {
-                println!("{:?}", self.current);
-
-                self.skip_comments(); // I can deffinelty find a better way to do this
-                Some(Inline::Text(""))
-            }
-            Some(Token::CommentEnd) => {
-                self.bump();
-                Some(Inline::Text("'/"))
-            }
-            Some(Token::Backtick) => {
-                let rem = self.lexer.remainder();
-
-                if let Some(close_idx) = rem.find('`') {
-                    let content = &rem[..close_idx];
-
-                    if !content.contains("\n") {
-                        let after_code = &rem[close_idx + 1..];
-                        let mut lang = None;
-                        let mut total_skip = close_idx + 1;
-
-                        if after_code.starts_with('[')
-                            && let Some(end_bracket) = after_code.find(']')
-                        {
-                            let ident = &after_code[1..end_bracket];
-                            if !ident.is_empty() && !ident.contains(char::is_whitespace) {
-                                lang = Some(ident);
-                                total_skip += end_bracket + 1;
-                            }
-                        }
-
-                        self.lexer.bump(total_skip);
-                        self.bump();
-
-                        Some(Inline::Code { content, lang })
-                    } else {
-                        self.bump();
-                        Some(Inline::Text("`"))
+                if after_code.starts_with('[')
+                    && let Some(end_bracket) = after_code.find(']')
+                {
+                    let ident = &after_code[1..end_bracket];
+                    if !ident.is_empty() && !ident.contains(char::is_whitespace) {
+                        lang = Some(ident);
+                        total_skip += end_bracket + 1;
                     }
-                } else {
+                }
+
+                self.lexer.bump(total_skip);
+                self.bump();
+
+                Some(Inline::Code { content, lang })
+            } else {
+                self.bump();
+                Some(Inline::Text("`"))
+            }
+        } else {
+            self.bump();
+            Some(Inline::Text("`"))
+        }
+    }
+    fn parse_inline(&mut self) -> Option<Inline<'a>> {
+        if let Some(tok) = &self.current
+            && is_text_token(tok)
+        {
+            let start = self.lexer.span().start;
+            let mut end = self.lexer.span().end;
+
+            self.bump();
+            while let Some(next_tok) = &self.current {
+                if is_text_token(next_tok) {
+                    end = self.lexer.span().end;
                     self.bump();
-                    Some(Inline::Text("`"))
+                } else {
+                    break;
                 }
             }
 
+            let full_text = &self.lexer.source()[start..end];
+            return Some(Inline::Text(full_text));
+        }
+
+        match self.current {
+            Some(Token::Backtick) => self.parse_inline_code(),
+
+            Some(Token::CommentStart) => {
+                self.skip_comments();
+                self.parse_inline()
+            }
+
             Some(Token::Bold) => Some(self.parse_delimited(Delimiter::Bold, Inline::Bold)),
-
             Some(Token::Italic) => Some(self.parse_delimited(Delimiter::Italic, Inline::Italic)),
-
             Some(Token::Underline) => {
                 Some(self.parse_delimited(Delimiter::Underline, Inline::Underline))
             }
-
             Some(Token::Striketrhu) => {
                 Some(self.parse_delimited(Delimiter::Strikethru, Inline::Strikethru))
             }
