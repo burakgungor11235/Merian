@@ -18,6 +18,8 @@ pub enum Block<'a> {
         level: i32,
         content: Vec<Block<'a>>,
     },
+
+    #[allow(clippy::enum_variant_names)]
     CodeBlock {
         lang: &'a str,
         title: Option<&'a str>,
