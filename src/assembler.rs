@@ -1,4 +1,4 @@
-use crate::ast::{Block, Document, Inline};
+use crate::ast::{Block, Document, Inline, ListMarker};
 use std::fmt::Write;
 
 // still pretty rudementary but we're getting there.
@@ -96,15 +96,13 @@ impl Assembler {
         }
     }
     fn render_list(&mut self, items: &[crate::ast::ListItem]) {
-        let unordered = items
-            .iter()
-            .all(|item| item.marker == "*" || item.marker == "-");
+        let unordered = items.iter().all(|item| item.marker.is_unordered());
 
         let list_type = if unordered {
-            if items.first().is_some_and(|item| item.marker == "*") {
-                "bullet"
-            } else {
-                "dash"
+            match &items.first().unwrap().marker {
+                ListMarker::Bullet => "bullet",
+                ListMarker::Dash => "dash",
+                _ => "ordered",
             }
         } else {
             "ordered"
@@ -123,7 +121,7 @@ impl Assembler {
             .unwrap();
 
             self.buffer.push_str("<span class=\"marker\">");
-            self.escape_html(&item.marker);
+            self.escape_html(&item.marker.to_string());
             self.buffer.push_str("</span>\n");
 
             self.buffer.push_str("<div class=\"content\">\n");

@@ -2,7 +2,7 @@ use logos::Logos;
 use std::collections::VecDeque;
 
 use crate::{
-    ast::{Block, Document, DocumentMetadata, Inline, ListItem},
+    ast::{AutoSymbol, Block, Document, DocumentMetadata, Inline, ListItem, ListMarker},
     lexer::Token::{self, CommentEnd},
 };
 
@@ -32,26 +32,6 @@ fn delimiter(token: &Token<'_>) -> Option<Delimiter> {
         Token::Underline => Some(Delimiter::Underline),
         Token::Striketrhu => Some(Delimiter::Strikethru),
         _ => None,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AutoSymbol {
-    Numeric,    // '+'
-    LowerAlpha, // '-'
-    UpperAlpha, // '^'
-    Roman,      // '='
-}
-
-impl AutoSymbol {
-    fn from_char(c: char) -> Option<Self> {
-        match c {
-            '+' => Some(Self::Numeric),
-            '-' => Some(Self::LowerAlpha),
-            '^' => Some(Self::UpperAlpha),
-            '=' => Some(Self::Roman),
-            _ => None,
-        }
     }
 }
 
@@ -108,17 +88,17 @@ impl ListCounter {
         self.stack.clear();
     }
 
-    fn explicit(&mut self, num: usize) -> (usize, String) {
+    fn explicit(&mut self, num: usize) -> (usize, ListMarker) {
         if self.stack.is_empty() {
             self.stack.push((AutoSymbol::Numeric, num));
         } else {
             self.stack.truncate(1);
             self.stack[0] = (AutoSymbol::Numeric, num);
         }
-        (1, format!("{num}."))
+        (1, ListMarker::Ordered(num))
     }
 
-    fn auto(&mut self, symbols: &[AutoSymbol]) -> (usize, String) {
+    fn auto(&mut self, symbols: &[AutoSymbol]) -> (usize, ListMarker) {
         let depth = symbols.len().max(1);
 
         if depth < self.stack.len() {
@@ -169,7 +149,7 @@ impl ListCounter {
 
         formatted.push('.');
 
-        (depth, formatted)
+        (depth, ListMarker::Auto(symbols.to_vec(), formatted))
     }
 }
 fn is_text_token(token: &Token<'_>) -> bool {
@@ -293,7 +273,7 @@ impl<'a> Parser<'a> {
             self.bump();
         }
     }
-    fn try_parse_list_marker(&mut self) -> Option<(usize, String)> {
+    fn try_parse_list_marker(&mut self) -> Option<(usize, ListMarker)> {
         let mut skipped_toks = Vec::new();
 
         while matches!(self.current, Some(Token::Whitespace(_))) {
@@ -331,7 +311,7 @@ impl<'a> Parser<'a> {
 
         res
     }
-    fn try_parse_explicit_list(&mut self) -> Option<(usize, String)> {
+    fn try_parse_explicit_list(&mut self) -> Option<(usize, ListMarker)> {
         let Some(Token::Text(digits)) = self.current else {
             return None;
         };
@@ -352,7 +332,7 @@ impl<'a> Parser<'a> {
 
         Some(self.list_counter.explicit(num))
     }
-    fn try_parse_unordered_list(&mut self) -> Option<(usize, String)> {
+    fn try_parse_unordered_list(&mut self) -> Option<(usize, ListMarker)> {
         let marker = match self.current {
             Some(Token::Minus) => '-',
             Some(Token::Star) => '*',
@@ -404,9 +384,16 @@ impl<'a> Parser<'a> {
         self.bump();
         self.skip_whitespace();
 
-        Some((extra + 1, marker.to_string()))
+        Some((
+            extra + 1,
+            if marker == '*' {
+                ListMarker::Bullet
+            } else {
+                ListMarker::Dash
+            },
+        ))
     }
-    fn try_parse_auto_list(&mut self) -> Option<(usize, String)> {
+    fn try_parse_auto_list(&mut self) -> Option<(usize, ListMarker)> {
         let symbol = match self.current {
             Some(Token::Plus) => AutoSymbol::Numeric,
             Some(Token::Minus) => AutoSymbol::LowerAlpha,
@@ -426,7 +413,7 @@ impl<'a> Parser<'a> {
 
         self.try_parse_nested_auto_list(symbol)
     }
-    fn try_parse_nested_auto_list(&mut self, first: AutoSymbol) -> Option<(usize, String)> {
+    fn try_parse_nested_auto_list(&mut self, first: AutoSymbol) -> Option<(usize, ListMarker)> {
         let rem = self.lexer.remainder();
 
         if !rem.starts_with('.') {
@@ -458,7 +445,7 @@ impl<'a> Parser<'a> {
         Some(self.list_counter.auto(&symbols))
     }
 
-    fn parse_list_with(&mut self, first_depth: usize, first_label: String) -> Block<'a> {
+    fn parse_list_with(&mut self, first_depth: usize, first_marker: ListMarker) -> Block<'a> {
         let mut items = Vec::new();
 
         let first_para = Block::Paragraph(self.parse_until_newline());
@@ -467,7 +454,7 @@ impl<'a> Parser<'a> {
 
         items.push(ListItem {
             depth: first_depth,
-            marker: first_label,
+            marker: first_marker,
             blocks: item_blocks,
         });
 
@@ -502,14 +489,14 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
 
-            if let Some((depth, label)) = self.try_parse_list_marker() {
+            if let Some((depth, marker)) = self.try_parse_list_marker() {
                 let first_para = Block::Paragraph(self.parse_until_newline());
                 let mut item_blocks = vec![first_para];
                 self.parse_gutter_blocks(&mut item_blocks);
 
                 items.push(ListItem {
                     depth,
-                    marker: label,
+                    marker,
                     blocks: item_blocks,
                 });
             } else {

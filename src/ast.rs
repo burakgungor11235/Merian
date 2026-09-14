@@ -1,3 +1,5 @@
+use std::fmt::{self, Display};
+
 #[derive(Debug)]
 pub struct Document<'a> {
     pub meta: DocumentMetadata,
@@ -30,12 +32,60 @@ pub enum Block<'a> {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoSymbol {
+    Numeric,    // '+'
+    LowerAlpha, // '-'
+    UpperAlpha, // '^'
+    Roman,      // '='
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListMarker {
+    Bullet,                        // '*'
+    Dash,                          // '-'
+    Ordered(usize),                // '1.', '2.', etc.
+    Auto(Vec<AutoSymbol>, String), // auto symbols + formatted label
+}
+
+impl AutoSymbol {
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            '+' => Some(Self::Numeric),
+            '-' => Some(Self::LowerAlpha),
+            '^' => Some(Self::UpperAlpha),
+            '=' => Some(Self::Roman),
+            _ => None,
+        }
+    }
+}
+impl ListMarker {
+    pub fn is_unordered(&self) -> bool {
+        matches!(self, Self::Bullet | Self::Dash)
+    }
+
+    pub fn is_ordered(&self) -> bool {
+        !self.is_unordered()
+    }
+}
+
+impl Display for ListMarker {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ListMarker::Bullet => write!(f, "*"),
+            ListMarker::Dash => write!(f, "-"),
+            ListMarker::Ordered(n) => write!(f, "{n}."),
+            ListMarker::Auto(_, label) => write!(f, "{label}"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ListItem<'a> {
     pub depth: usize,
-    pub marker: String, // promote this to an enum in the future.
+    pub marker: ListMarker,
     pub blocks: Vec<Block<'a>>,
 }
+
 #[derive(Debug)]
 pub enum Inline<'a> {
     Text(&'a str),
