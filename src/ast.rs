@@ -30,6 +30,7 @@ pub enum Block<'a> {
     List {
         items: Vec<ListItem<'a>>,
     },
+    ThematicBreak,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

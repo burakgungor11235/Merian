@@ -93,6 +93,7 @@ impl Assembler {
             Block::List { items } => {
                 self.render_list(items);
             }
+            Block::ThematicBreak => self.buffer.push_str("<hr/>"),
         }
     }
     fn render_list(&mut self, items: &[crate::ast::ListItem]) {

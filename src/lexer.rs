@@ -67,6 +67,9 @@ pub enum Token<'a> {
     #[token("<!")]
     CodeBlockStart,
 
+    #[regex(r"---[ \t]*(?:\n|$)", priority = 21)]
+    ThematicBreak,
+
     // ON GOD THIS THING IS GOING TO BE HUGE AT THE END OF THIS. MY HEAD IS HURTING.
     #[regex(r#"[^ \t\n#*_~=`\[\]/'<>|+^.=-]+"#)]
     Text(&'a str),
@@ -125,5 +128,18 @@ mod tests {
         assert_eq!(lexer.next(), wrap!(Underline));
         assert_eq!(lexer.next(), wrap!(Text("important")));
         assert_eq!(lexer.next(), wrap!(Underline));
+    }
+    #[test]
+    fn thematic_vs_list() {
+        let mut lexer = Token::lexer("--- ThematicBreak\n---\n---\t\t\t");
+        print!("{:?}", lexer.remainder());
+        assert_eq!(lexer.next(), wrap!(Minus));
+        assert_eq!(lexer.next(), wrap!(Minus));
+        assert_eq!(lexer.next(), wrap!(Minus));
+        lexer.next(); // Whitespace
+        lexer.next(); // Text("ThematicBreak")
+        lexer.next(); // Newline
+        assert_eq!(lexer.next(), wrap!(ThematicBreak));
+        assert_eq!(lexer.next(), wrap!(ThematicBreak));
     }
 }

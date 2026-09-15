@@ -225,6 +225,10 @@ impl<'a> Parser<'a> {
                 self.bump();
                 None
             }
+            Some(Token::ThematicBreak) => {
+                self.bump();
+                Some(Block::ThematicBreak)
+            }
             Some(_) => {
                 let p = self.parse_paragraph();
                 if let Block::Paragraph(ref inlines) = p
