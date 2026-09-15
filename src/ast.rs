@@ -64,6 +64,7 @@ impl ListMarker {
         matches!(self, Self::Bullet | Self::Dash)
     }
 
+    #[allow(dead_code)] // for future use, probably...
     pub fn is_ordered(&self) -> bool {
         !self.is_unordered()
     }
