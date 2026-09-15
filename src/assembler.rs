@@ -96,27 +96,56 @@ impl Assembler {
         }
     }
     fn render_list(&mut self, items: &[crate::ast::ListItem]) {
-        let unordered = items.iter().all(|item| item.marker.is_unordered());
-
-        let list_type = if unordered {
-            match &items.first().unwrap().marker {
-                ListMarker::Bullet => "bullet",
-                ListMarker::Dash => "dash",
-                _ => "ordered",
-            }
+        let first_marker = &items[0].marker;
+        let outer_tag = if first_marker.is_unordered() {
+            "ul"
         } else {
-            "ordered"
+            "ol"
+        };
+        let outer_type = match first_marker {
+            ListMarker::Bullet => "bullet",
+            ListMarker::Dash => "dash",
+            _ => "ordered",
         };
 
-        let tag = if unordered { "ul" } else { "ol" };
-
-        writeln!(self.buffer, "<{} class=\"merian-list {}\">", tag, list_type).unwrap();
+        let mut stack: Vec<usize> = Vec::new();
+        let mut li_open: Vec<bool> = Vec::new();
 
         for item in items {
+            let depth = item.depth;
+
+            while stack.last().is_some_and(|&d| d > depth) {
+                if li_open.last() == Some(&true) {
+                    self.buffer.push_str("</li>\n");
+                    *li_open.last_mut().unwrap() = false;
+                }
+                self.buffer.push_str("</");
+                self.buffer.push_str(outer_tag);
+                self.buffer.push_str(">\n");
+                stack.pop();
+                li_open.pop();
+            }
+
+            if stack.last() == Some(&depth) && li_open.last() == Some(&true) {
+                self.buffer.push_str("</li>\n");
+                *li_open.last_mut().unwrap() = false;
+            }
+
+            while stack.last().is_some_and(|&d| d < depth) || stack.is_empty() {
+                writeln!(
+                    self.buffer,
+                    "<{} class=\"merian-list {}\">",
+                    outer_tag, outer_type
+                )
+                .unwrap();
+                stack.push(depth);
+                li_open.push(false);
+            }
+
             writeln!(
                 self.buffer,
                 "<li class=\"merian-list-item depth-{}\">",
-                item.depth
+                depth
             )
             .unwrap();
 
@@ -131,10 +160,17 @@ impl Assembler {
             }
 
             self.buffer.push_str("</div>\n");
-            self.buffer.push_str("</li>\n");
+            *li_open.last_mut().unwrap() = true;
         }
 
-        writeln!(self.buffer, "</{}>", tag).unwrap();
+        for has_li in li_open.iter().rev() {
+            if *has_li {
+                self.buffer.push_str("</li>\n");
+            }
+            self.buffer.push_str("</");
+            self.buffer.push_str(outer_tag);
+            self.buffer.push_str(">\n");
+        }
     }
 
     fn render_inlines(&mut self, inlines: &[Inline]) {
