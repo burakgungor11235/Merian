@@ -70,12 +70,10 @@ fn run(cli: &Cli) {
 
         let tokens: Vec<_> = Token::lexer(&source).map(|t| format!("{t:?}")).collect();
         println!("{tokens:#?}");
-        return;
     }
 
     if cli.dump_ast {
         println!("{doc:#?}");
-        return;
     }
 
     let html_output = assembler::Assembler::default().assemble(&doc);
