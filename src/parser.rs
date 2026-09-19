@@ -171,6 +171,7 @@ pub struct Parser<'a> {
     open_delimiters: Vec<Delimiter>,
     token_buffer: VecDeque<Token<'a>>,
     list_counter: ListCounter,
+    pending_list: Option<(i32, usize, ListMarker)>,
 }
 
 pub fn parse(input: &str) -> Document<'_> {
@@ -188,6 +189,7 @@ impl<'a> Parser<'a> {
             open_delimiters: Vec::new(),
             token_buffer: VecDeque::new(),
             list_counter: ListCounter::new(),
+            pending_list: None,
         }
     }
 
@@ -210,8 +212,15 @@ impl<'a> Parser<'a> {
         blocks
     }
     fn parse_block(&mut self) -> Option<Block<'a>> {
-        if let Some((depth, label)) = self.try_parse_list_marker() {
-            return Some(self.parse_list_with(depth, label));
+        if let Some((quote, depth, label)) = self.next_list_marker() {
+            let inner = self.parse_list_with(quote, depth, label);
+            if quote > 0 {
+                return Some(Block::Quote {
+                    level: quote,
+                    content: vec![inner],
+                });
+            }
+            return Some(inner);
         }
 
         match self.current {
@@ -277,7 +286,13 @@ impl<'a> Parser<'a> {
             self.bump();
         }
     }
-    fn try_parse_list_marker(&mut self) -> Option<(usize, ListMarker)> {
+    fn next_list_marker(&mut self) -> Option<(i32, usize, ListMarker)> {
+        if let Some(pending) = self.pending_list.take() {
+            return Some(pending);
+        }
+        self.try_parse_list_marker()
+    }
+    fn try_parse_list_marker(&mut self) -> Option<(i32, usize, ListMarker)> {
         let mut skipped_toks = Vec::new();
 
         while matches!(self.current, Some(Token::Whitespace(_))) {
@@ -310,6 +325,11 @@ impl<'a> Parser<'a> {
             .sum();
         let indent_depth = indent_width / 2 + 1;
 
+        let quote_depth = skipped_toks
+            .iter()
+            .filter(|tok| **tok == Token::BiggerThan)
+            .count() as i32;
+
         let res = self
             .try_parse_explicit_list()
             .or_else(|| self.try_parse_unordered_list(indent_depth))
@@ -326,9 +346,10 @@ impl<'a> Parser<'a> {
                 }
                 self.current = self.token_buffer.pop_front();
             }
+            return None;
         }
 
-        res
+        res.map(|(depth, marker)| (quote_depth, depth, marker))
     }
     fn try_parse_explicit_list(&mut self) -> Option<(usize, ListMarker)> {
         let Some(Token::Text(digits)) = self.current else {
@@ -420,7 +441,17 @@ impl<'a> Parser<'a> {
         Some(self.list_counter.auto(&symbols))
     }
 
-    fn parse_list_with(&mut self, first_depth: usize, first_marker: ListMarker) -> Block<'a> {
+    /// Collects one list run at `base_quote`. Items quoted deeper than the
+    /// base (only when already inside a quoted run) nest as
+    /// `Quote > List` inside the preceding item; items quoted shallower are
+    /// stashed for the outer caller. Returns the bare list; the caller wraps
+    /// it in a Quote when `base_quote > 0`.
+    fn parse_list_with(
+        &mut self,
+        base_quote: i32,
+        first_depth: usize,
+        first_marker: ListMarker,
+    ) -> Block<'a> {
         let mut items = Vec::new();
 
         let first_para = Block::Paragraph(self.parse_until_newline());
@@ -448,16 +479,35 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            if let Some((depth, marker)) = self.try_parse_list_marker() {
-                let first_para = Block::Paragraph(self.parse_until_newline());
-                let mut item_blocks = vec![first_para];
-                self.parse_gutter_blocks(&mut item_blocks);
+            if let Some((quote, depth, marker)) = self.next_list_marker() {
+                // This code is organic as the shit a cow produces.
+                // it works tho.. don't ask further.
+                if quote == base_quote {
+                    let first_para = Block::Paragraph(self.parse_until_newline());
+                    let mut item_blocks = vec![first_para];
+                    self.parse_gutter_blocks(&mut item_blocks);
 
-                items.push(ListItem {
-                    depth,
-                    marker,
-                    blocks: item_blocks,
-                });
+                    items.push(ListItem {
+                        depth,
+                        marker,
+                        blocks: item_blocks,
+                    });
+                } else if quote > base_quote && base_quote > 0 {
+                    let nested = self.parse_list_with(quote, depth, marker.clone());
+                    let quoted = Block::Quote {
+                        level: quote,
+                        content: vec![nested],
+                    };
+                    if let Some(last) = items.last_mut() {
+                        last.blocks.push(quoted);
+                    } else {
+                        self.pending_list = Some((quote, depth, marker));
+                        break;
+                    }
+                } else {
+                    self.pending_list = Some((quote, depth, marker));
+                    break;
+                }
             } else {
                 break;
             }
@@ -675,10 +725,8 @@ impl<'a> Parser<'a> {
                 } else if next_level > level {
                     let inlines = self.parse_until_newline();
                     if !inlines.is_empty() {
-                        content.push(Block::Quote {
-                            level: next_level,
-                            content: vec![Block::Paragraph(inlines)],
-                        });
+                        let para = Block::Paragraph(inlines);
+                        Self::push_deep_quote(&mut content, next_level, para);
                     }
                 } else {
                     if let Some(tok) = self.current.take() {
@@ -708,6 +756,30 @@ impl<'a> Parser<'a> {
         }
 
         Block::Quote { level, content }
+    }
+
+    /**
+    NOTE:
+    Documented here because I'm lazy to document it internally.
+    Smart attach for deeper quote lines.
+    `> / >> / >>>` nests stepwise; jumps like `>> -> >>>>>` attach one
+    structural level deeper while preserving the requested level for
+    styling. Siblings (e.g. `>>>>> -> >>>`) stay siblings.
+    */
+    fn push_deep_quote(content: &mut Vec<Block<'a>>, next_level: i32, para: Block<'a>) {
+        if let Some(Block::Quote {
+            level: last_level,
+            content: last_content,
+        }) = content.last_mut()
+            && *last_level < next_level
+        {
+            Self::push_deep_quote(last_content, next_level, para);
+            return;
+        }
+        content.push(Block::Quote {
+            level: next_level,
+            content: vec![para],
+        });
     }
 
     fn parse_until_paragraph_break(&mut self) -> Vec<Inline<'a>> {
