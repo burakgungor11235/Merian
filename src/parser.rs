@@ -295,9 +295,24 @@ impl<'a> Parser<'a> {
             }
         }
 
+        let indent_width: usize = skipped_toks
+            .iter()
+            .filter_map(|tok| match tok {
+                Token::Whitespace(s) => {
+                    Some(
+                        s.chars()
+                            .map(|c| if c == '\t' { 2 } else { 1 })
+                            .sum::<usize>(), //           ^ Cry about it. >:3
+                    )
+                }
+                _ => None,
+            })
+            .sum();
+        let indent_depth = indent_width / 2 + 1;
+
         let res = self
             .try_parse_explicit_list()
-            .or_else(|| self.try_parse_unordered_list())
+            .or_else(|| self.try_parse_unordered_list(indent_depth))
             .or_else(|| self.try_parse_auto_list());
 
         if res.is_none() {
@@ -336,66 +351,22 @@ impl<'a> Parser<'a> {
 
         Some(self.list_counter.explicit(num))
     }
-    fn try_parse_unordered_list(&mut self) -> Option<(usize, ListMarker)> {
-        let marker = match self.current {
-            Some(Token::Minus) => '-',
-            Some(Token::Star) => '*',
+    fn try_parse_unordered_list(&mut self, indent_depth: usize) -> Option<(usize, ListMarker)> {
+        match self.current {
+            Some(Token::Star) => {}
             _ => return None,
         };
 
         let rem = self.lexer.remainder();
 
-        /*
-        NOTICE TO DEVELOPERS:
-
-        Now here might lead to a bug:
-
-        * elem
-        ** sub elem
-        *** sub-sub elem
-
-        This could technically be parsed as a:
-
-        ul depth 1
-        ul depth 2
-        ul depth 3
-
-        but it isn't because
-
-        literal `*` is Token::Star
-
-        and
-
-        literal `**` is Token::Bold
-
-        Now I don't want to disallow
-
-        ** bold paragraph bla bla bla bla bla ... **
-
-        so I'm keeping it in this way so that it "technically" has the
-        capability to do it like that but lexer disallows it from doing it.
-
-        I have no fancy conceptual reasons to disallow deeper bullet lists, it's a language limitation.
-        */
-        let extra = rem.chars().take_while(|&c| c == marker).count();
-        let after = &rem[extra..];
-
-        if !after.starts_with([' ', '\t']) {
+        if !rem.starts_with([' ', '\t']) {
             return None;
         }
 
-        self.lexer.bump(extra);
         self.bump();
         self.skip_whitespace();
 
-        Some((
-            extra + 1,
-            if marker == '*' {
-                ListMarker::Bullet
-            } else {
-                ListMarker::Dash
-            },
-        ))
+        Some((indent_depth, ListMarker::Bullet))
     }
     fn try_parse_auto_list(&mut self) -> Option<(usize, ListMarker)> {
         let symbol = match self.current {
@@ -468,29 +439,13 @@ impl<'a> Parser<'a> {
             }
 
             if self.current == Some(Token::ParagraphBreak) {
-                let rem = self
-                    .lexer
-                    .remainder()
-                    .trim_start_matches([' ', '\t', '\r', '\n', '>']);
-                if rem.starts_with('+')
-                    || rem.starts_with('-')
-                    || rem.starts_with('^')
-                    || rem.starts_with('=')
-                    || rem
-                        .as_bytes()
-                        .first()
-                        .map_or_else(|| false, |b| b.is_ascii_digit())
-                {
+                self.bump();
+                while matches!(self.current, Some(Token::Newline)) {
                     self.bump();
-                } else {
+                }
+                if self.current.is_none() {
                     break;
                 }
-            }
-
-            self.skip_whitespace();
-
-            if matches!(self.current, Some(Token::Whitespace(_))) {
-                self.bump();
             }
 
             if let Some((depth, marker)) = self.try_parse_list_marker() {
@@ -627,7 +582,12 @@ impl<'a> Parser<'a> {
 
             Some(Token::Minus) => {
                 let rem = self.lexer.remainder();
-                rem.starts_with([' ', '\t', '.', '-'])
+                rem.starts_with([' ', '\t', '.'])
+            }
+
+            Some(Token::Star) => {
+                let rem = self.lexer.remainder();
+                rem.starts_with([' ', '\t'])
             }
 
             Some(Token::Text(digits)) if digits.chars().all(|c| c.is_ascii_digit()) => {
@@ -637,13 +597,21 @@ impl<'a> Parser<'a> {
 
             Some(Token::Whitespace(_)) => {
                 let rem = self.lexer.remainder().trim_start_matches([' ', '\t', '>']);
-                rem.starts_with('|')
+                rem.starts_with('|') // I could be smart here, but I want to be verbose while
+                                     // developing it 
                     || rem.starts_with("+ ")
+                    || rem.starts_with("+\t")
                     || rem.starts_with("+.")
                     || rem.starts_with("- ")
+                    || rem.starts_with("-\t")
                     || rem.starts_with("-.")
-                    || rem.starts_with("--")
+                    || rem.starts_with("* ")
+                    || rem.starts_with("*\t")
+                    || rem.starts_with("^ ")
+                    || rem.starts_with("^\t")
                     || rem.starts_with("^.")
+                    || rem.starts_with("= ")
+                    || rem.starts_with("=\t")
                     || rem.starts_with("=.")
                     || (rem
                         .as_bytes()

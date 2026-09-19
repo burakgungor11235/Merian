@@ -43,7 +43,6 @@ pub enum AutoSymbol {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListMarker {
     Bullet,                        // '*'
-    Dash,                          // '-'
     Ordered(usize),                // '1.', '2.', etc.
     Auto(Vec<AutoSymbol>, String), // auto symbols + formatted label
 }
@@ -61,7 +60,7 @@ impl AutoSymbol {
 }
 impl ListMarker {
     pub fn is_unordered(&self) -> bool {
-        matches!(self, Self::Bullet | Self::Dash)
+        matches!(self, Self::Bullet)
     }
 
     #[allow(dead_code)] // for future use, probably...
@@ -74,7 +73,6 @@ impl Display for ListMarker {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ListMarker::Bullet => write!(f, "*"),
-            ListMarker::Dash => write!(f, "-"),
             ListMarker::Ordered(n) => write!(f, "{n}."),
             ListMarker::Auto(_, label) => write!(f, "{label}"),
         }
