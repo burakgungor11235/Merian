@@ -441,11 +441,7 @@ impl<'a> Parser<'a> {
         Some(self.list_counter.auto(&symbols))
     }
 
-    /// Collects one list run at `base_quote`. Items quoted deeper than the
-    /// base (only when already inside a quoted run) nest as
-    /// `Quote > List` inside the preceding item; items quoted shallower are
-    /// stashed for the outer caller. Returns the bare list; the caller wraps
-    /// it in a Quote when `base_quote > 0`.
+    /// Parse a list while keeping what's at the left in mind
     fn parse_list_with(
         &mut self,
         base_quote: i32,
@@ -762,9 +758,9 @@ impl<'a> Parser<'a> {
     NOTE:
     Documented here because I'm lazy to document it internally.
     Smart attach for deeper quote lines.
-    `> / >> / >>>` nests stepwise; jumps like `>> -> >>>>>` attach one
+    `> / >> / >>>` nests stepwise: jumps like `>> \n >>>>>` attach one
     structural level deeper while preserving the requested level for
-    styling. Siblings (e.g. `>>>>> -> >>>`) stay siblings.
+    styling. Siblings (e.g. `>>>>> & >>>`) stay siblings.
     */
     fn push_deep_quote(content: &mut Vec<Block<'a>>, next_level: i32, para: Block<'a>) {
         if let Some(Block::Quote {
