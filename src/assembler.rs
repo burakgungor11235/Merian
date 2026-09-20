@@ -332,7 +332,7 @@ impl Assembler {
             }
             Inline::Link { url, text } => {
                 self.buffer.push_str("<a href=");
-                self.buffer.push_str(url); // here too. 
+                self.escape_html(url); // here too. 
                 self.buffer.push_str(">\n");
 
                 self.escape_html(text);
