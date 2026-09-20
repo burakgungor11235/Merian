@@ -675,9 +675,13 @@ impl<'a> Parser<'a> {
         let level = self.consume_quote_prefix();
         let mut content = Vec::new();
 
-        let inlines = self.parse_until_newline();
-        if !inlines.is_empty() {
-            content.push(Block::Paragraph(inlines));
+        if self.current == Some(Token::CodeBlockStart) {
+            content.push(self.parse_code_block());
+        } else {
+            let inlines = self.parse_until_newline();
+            if !inlines.is_empty() {
+                content.push(Block::Paragraph(inlines));
+            }
         }
 
         loop {
@@ -697,10 +701,10 @@ impl<'a> Parser<'a> {
 
                 let next_level = skipped.len() as i32;
 
-                let is_interrupting_boundary =
-                    self.is_at_block_boundary() && self.current != Some(Token::BiggerThan);
+                let is_interrupting_boundary = self.is_at_block_boundary()
+                    && self.current != Some(Token::BiggerThan)
+                    && self.current != Some(Token::CodeBlockStart);
 
-                // If the quote detects an embedded logic block (e.g. list, gutters), yield parsing
                 if next_level >= level && is_interrupting_boundary {
                     if let Some(tok) = self.current.take() {
                         self.token_buffer.push_front(tok);
@@ -716,9 +720,13 @@ impl<'a> Parser<'a> {
                 }
 
                 if next_level == level {
-                    let inlines = self.parse_until_newline();
-                    if !inlines.is_empty() {
-                        content.push(Block::Paragraph(inlines));
+                    if self.current == Some(Token::CodeBlockStart) {
+                        content.push(self.parse_code_block());
+                    } else {
+                        let inlines = self.parse_until_newline();
+                        if !inlines.is_empty() {
+                            content.push(Block::Paragraph(inlines));
+                        }
                     }
                 } else if next_level > level {
                     let inlines = self.parse_until_newline();
