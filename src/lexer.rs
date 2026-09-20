@@ -33,6 +33,9 @@ pub enum Token<'a> {
     #[token("]")]
     RBracket,
 
+    #[token("![")]
+    ImageOpen,
+
     #[regex(r"[ \t]+")]
     Whitespace(&'a str),
 

@@ -102,4 +102,8 @@ pub enum Inline<'a> {
         url: &'a str,  // hoist up to a url enum / struct in the future.
         text: &'a str, // text has to be optional but eeeeh
     },
+    Image {
+        img_source: &'a str,
+        alt: &'a str,
+    },
 }

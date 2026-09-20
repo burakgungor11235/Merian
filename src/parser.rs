@@ -164,6 +164,7 @@ fn is_text_token(token: &Token<'_>) -> bool {
             | Token::Newline
             | Token::ParagraphBreak // add tokens that shouldn't be treated as text.
             | Token::LBracket
+            | Token::ImageOpen
     )
 }
 pub struct Parser<'a> {
@@ -978,6 +979,7 @@ impl<'a> Parser<'a> {
             }
 
             Some(Token::LBracket) => Some(self.parse_link()),
+            Some(Token::ImageOpen) => Some(self.parse_image()),
             _ => None,
         }
     }
@@ -1133,6 +1135,83 @@ impl<'a> Parser<'a> {
             "["
         };
         Inline::Text(text)
+    }
+
+    fn parse_image(&mut self) -> Inline<'a> {
+        let open_span = self.lexer.span();
+        self.bump();
+
+        self.skip_whitespace();
+        let url_start = match &self.current {
+            Some(Token::RBracket | Token::Newline | Token::ParagraphBreak) | None => {
+                return Inline::Text(&self.lexer.source()[open_span.start..open_span.end]);
+            }
+            Some(_) => self.lexer.span().start,
+        };
+
+        let mut url_end = url_start;
+        let mut has_pipe = false;
+        let mut closed = false;
+
+        while let Some(tok) = &self.current {
+            match tok {
+                Token::Pipe => {
+                    has_pipe = true;
+                    url_end = self.lexer.span().start;
+                    self.bump();
+                    break;
+                }
+                Token::RBracket => {
+                    url_end = self.lexer.span().start;
+                    self.bump();
+                    closed = true;
+                    break;
+                }
+                Token::Newline | Token::ParagraphBreak => break,
+                _ => {
+                    url_end = self.lexer.span().end;
+                    self.bump();
+                }
+            }
+        }
+
+        let img_source = self.lexer.source()[url_start..url_end].trim();
+        let mut alt = "";
+
+        if has_pipe {
+            self.skip_whitespace();
+            let alt_start = self.lexer.span().start;
+            let mut alt_end = alt_start;
+
+            while let Some(tok) = &self.current {
+                match tok {
+                    Token::RBracket => {
+                        alt_end = self.lexer.span().start;
+                        self.bump();
+                        closed = true;
+                        break;
+                    }
+                    Token::Newline | Token::ParagraphBreak => break,
+                    _ => {
+                        alt_end = self.lexer.span().end;
+                        self.bump();
+                    }
+                }
+            }
+            alt = self.lexer.source()[alt_start..alt_end].trim();
+        }
+
+        if !closed || img_source.is_empty() {
+            let fallback_end = self.lexer.span().start;
+            let text = if fallback_end > open_span.start {
+                &self.lexer.source()[open_span.start..fallback_end]
+            } else {
+                &self.lexer.source()[open_span.start..open_span.end]
+            };
+            return Inline::Text(text);
+        }
+
+        Inline::Image { img_source, alt }
     }
 }
 // tested by good enough tm

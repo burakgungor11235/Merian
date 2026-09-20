@@ -76,6 +76,7 @@ impl Assembler {
                         out.push_str(text)
                     }
                 }
+                Inline::Image { alt, .. } => out.push_str(alt),
             }
         }
     }
@@ -317,6 +318,13 @@ impl Assembler {
 
                 self.escape_html(text);
                 self.buffer.push_str("</a>");
+            }
+            Inline::Image { img_source, alt } => {
+                self.buffer.push_str("<img src=\"");
+                self.escape_html(img_source);
+                self.buffer.push_str("\" alt=\"");
+                self.escape_html(alt);
+                self.buffer.push_str("\">");
             }
         }
     }
