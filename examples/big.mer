@@ -1,0 +1,190 @@
+#1 Merian v0.1 Specification 
+
+This document tests parser state boundaries, nested delimiters, auto-counters, gutters, Giallo highlighting, quotes, links, images, and edge-case ambiguity.
+
+#1.1 Inline Formatting & Delimiter 
+
+Plain text followed by **bold**, __italic__, ==underline==, and ~~strikethrough~~.
+Testing nested inlines: **bold with __italic and ==underline and ~~strikethrough~~ inside== still italic__ still bold**.
+Adjacent inlines with no spaces: **bold****bold2**__italic____italic2__.
+Punctuation collision: **bold.with.dots**, __snake_case_variable_name__, ==under=score==, ~~tilde~tilde~~.
+Empty-ish formatting: **** and ____ and ==== and ~~~~ should not crash the parser.
+
+Inline code variations:
+- Basic: `let x = 42;`
+- Tagged: `int *ptr = NULL;`[c]
+- Complex generic: `fn map<T, U>(val: T) -> Option<U>`[rust]
+- Escaped backtick behavior: `let code_with_backtick = 1;`
+- Broken inline code without closing backtick should fall back gracefully: `let unclosed = 1
+
+Comments :
+/' simple comment '/
+Prefix /' middle comment '/ suffix
+Nested-looking: /' comment with /' inside and symbols #1.1 **bold** !> '/ still text.
+Multi-line comment:
+/'
+  This is a multi-line comment.
+  None of this should be in the HTML.
+  #1.99 Fake Heading
+  * Fake List
+  
+  **A fake jordan.**
+'/
+The word after comment should render immediately.
+
+#1.2 Links and Images 
+
+Links:
+- Standard: [https://bgslabs.org | Cool website ]
+- Autolink (no pipe): [https://example.com/autolink]
+- Link with URL containing parentheses (The Wikipedia Bug test): [https://en.wikipedia.org/wiki/Manatee_(disambiguation) | Manatee Article]
+- Link with trailing whitespace inside: [ https://bgslabs.org | Trimmed Label ]
+- Unclosed link fallback test: [https://big-cool-bob.lang unclosed without bracket should not crash.
+
+Images:
+- Standard image: ![https://graylineorlando.com/wp-content/uploads/2023/03/Gray-Line-Orlando-Mantee-Snorkel-Tour.jpg | A happy sea potato]
+- Autolink-style image (no alt): ![https://media.cnn.com/api/v1/images/stellar/prod/1g7a5511.jpg?c=original&q=w_860,c_fill]
+- A powerful image: ![https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSXQKcRobl3-CTaVlD3kK3ohwctEjOzqbC6KubhmYdsenvVO93x3xsQWY-4&s=10 | DRIP]
+- Unclosed image fallback: ![assets/broken.jpg unclosed image should not crash.
+
+#1.3 Blockquotes & Embedded Blocks 
+
+abstract art 
+
+> Single-line level 1 quote.
+
+> Multi-line level 1 quote.
+> Second line of the same quote.
+>> Nested level 2 quote.
+>>> Deeply nested level 3 quote.
+>> Back to level 2 quote.
+> Back to level 1 quote.
+
+Quote with embedded code block (The bug you just hit!):
+> Here is code inside a quote:
+> <!python: quoted_math.py
+def calculate_buoyancy(mass_kg: float, volume_m3: float) -> float:
+    RHO_WATER = 1025.0  # kg/m^3
+    return (volume_m3 * RHO_WATER) - mass_kg
+!>
+> And here is prose immediately following the quoted code block.
+
+Quote with inline formatting and links:
+> As stated in [https://www.biblegateway.com/passage/?search=2%20Samuel%206%3A14&version=ESV| 2 Samuel 6:14]: 
+>> And David danced before the Lord with all his might. And David was wearing a linen ephod.
+
+#1.4 List Hierarchy, Auto-Counters & Coordinate Algebra
+
+Explicit list with gutter attachments:
+1. Explicit item number 1
+| Attached gutter paragraph 1.
+| Attached gutter paragraph 2 with `inline code` and **bold**.
+| <!c:gutter_code.c
+void march(void) {
+    printf("Horses are horsing around...\n");
+}
+!>
+| Final attached gutter paragraph.
+
+Auto-increment lists (Counter continuation after explicit 1):
++ First auto-item (should render 2.)
++ Second auto-item (should render 3.)
+  +.+ Nested numeric depth two (should render 3.1.)
+  +.+ Nested numeric depth two sibling (should render 3.2.)
+    +.+.+ Nested numeric depth three (should render 3.2.1.)
+  +.+ Back to depth two (should render 3.3.)
++ Back to depth one (should render 4.)
+
+Coordinate type switching:
+- Lower alpha item a (should render a.)
+- Lower alpha item b (should render b.)
+  -.- Nested lower alpha (should render b.a.)
+  -.- Nested lower alpha sibling (should render b.b.)
+
+Upper alpha and Roman coordinates:
+^ Upper alpha 1 (should render A.)
+^ Upper alpha 2 (should render B.)
+= Roman numeral 1 (should render i.)
+= Roman numeral 2 (should render ii.)
+
+Mixed coordinate algebra:
++.+.- Mixed numeric-alpha coordinate (should render 1.1.a.)
++.+.= Mixed numeric-roman coordinate (should render 1.1.i.)
++.+.^ Mixed numeric-upper coordinate (should render 1.1.A.)
+
+Unordered bullet list with whitespace depth:
+* Bullet depth 1
+  * Bullet depth 2 via 2 spaces
+    * Bullet depth 3 via 4 spaces
+* Back to bullet depth 1
+
+Boundary : Bold at line-start must NOT be parsed as a bullet list:
+**This is bold text at column 0, NOT a bullet list.**
+
+#1.5 List Reset Test (Paragraph Break vs. Gutter)
+
++ List A item 1
+
+This paragraph breaks the list! The counter MUST reset below.
+(definetly didn't hit 3 different errors TvT)
+
++ List B item 1 (must render as 1., NOT 2.)
+
+#1.6 Code Blocks 
+
+Code block with title and language:
+<!rust:lexer_core.rs
+use logos::Logos;
+
+#[derive(Logos, Debug, PartialEq)]
+pub enum Token<'a> {
+    #[token("<!")]
+    CodeBlockStart,
+    #[regex(r"[a-zA-Z_]+")]
+    Ident(&'a str),
+}
+!>
+
+Code block with language only (no title, should push lang tag to the right):
+<!python
+import sys
+
+def main():
+    print(f"Python version: {sys.version}")
+
+if __name__ == "__main__":
+    main()
+!>
+
+Code block with title only (no language):
+<!:Plain Notes
+Just some arbitrary notes without a language identifier.
+Indentation should be preserved verbatim:
+    four spaces
+        eight spaces
+!>
+
+Code block with custom delimiter (contains `!>` inside the code!):
+<!bash:deploy.sh|CUSTOM_FENCE
+#!/usr/bin/env bash
+echo "This contains a raw closing tag: !> right here!"
+echo "And another one: !>"
+!CUSTOM_FENCE>
+
+Code block with tricky characters and HTML injection attempts:
+<!html:xss_test.html
+<script>alert("XSS attempt");</script>
+<div class="test" data-val="&quot;&amp;&lt;&gt;">
+    <p>Safe & sound</p>
+</div>
+!>
+
+#1.7 Thematic Breaks vs. Paragraph Dashes
+
+---
+
+--- is a paragraph with leading dashes, not a rule!
+
+---
+
+Final paragraph of the test document.
