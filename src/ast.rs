@@ -98,4 +98,8 @@ pub enum Inline<'a> {
         content: &'a str,
         lang: Option<&'a str>,
     },
+    Link {
+        url: &'a str,  // hoist up to a url enum / struct in the future.
+        text: &'a str, // text has to be optional but eeeeh
+    },
 }

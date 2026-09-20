@@ -163,6 +163,7 @@ fn is_text_token(token: &Token<'_>) -> bool {
             | Token::CommentStart
             | Token::Newline
             | Token::ParagraphBreak // add tokens that shouldn't be treated as text.
+            | Token::LBracket
     )
 }
 pub struct Parser<'a> {
@@ -976,6 +977,7 @@ impl<'a> Parser<'a> {
                 Some(self.parse_delimited(Delimiter::Strikethru, Inline::Strikethru))
             }
 
+            Some(Token::LBracket) => Some(self.parse_link()),
             _ => None,
         }
     }
@@ -1029,6 +1031,108 @@ impl<'a> Parser<'a> {
         }
 
         result
+    }
+
+    fn parse_link(&mut self) -> Inline<'a> {
+        let open_span = self.lexer.span();
+        self.bump(); // [
+
+        self.skip_whitespace();
+        let url_start = match &self.current {
+            Some(Token::RBracket | Token::Newline | Token::ParagraphBreak) | None => {
+                // [] or [
+                return Inline::Text(&self.lexer.source()[open_span.start..open_span.end]);
+            }
+            Some(_) => self.lexer.span().start,
+        };
+
+        let mut url_end = url_start;
+        let mut has_pipe = false;
+        let mut closed = false;
+
+        while let Some(tok) = &self.current {
+            match tok {
+                Token::Pipe => {
+                    has_pipe = true;
+                    url_end = self.lexer.span().start;
+
+                    self.bump(); // consume '|'
+                    break;
+                }
+                Token::RBracket => {
+                    url_end = self.lexer.span().start;
+                    self.bump(); // consume ']'
+                    closed = true;
+
+                    break;
+                }
+                Token::Newline | Token::ParagraphBreak => {
+                    // Links cannot cross lines/paragraphs
+
+                    break;
+                }
+                _ => {
+                    url_end = self.lexer.span().end;
+
+                    self.bump();
+                }
+            }
+        }
+
+        let raw_url = self.lexer.source()[url_start..url_end].trim();
+
+        // Autolink
+        if closed && !raw_url.is_empty() {
+            return Inline::Link {
+                url: raw_url,
+                text: raw_url, // Text defaults to URL
+            };
+        }
+
+        if has_pipe {
+            // TvT
+            self.skip_whitespace();
+            let label_start = self.lexer.span().start;
+            let mut label_end = label_start;
+
+            while let Some(tok) = &self.current {
+                match tok {
+                    Token::RBracket => {
+                        label_end = self.lexer.span().start;
+                        self.bump(); // consume ']'
+                        closed = true;
+                        break;
+                    }
+                    Token::Newline | Token::ParagraphBreak => {
+                        break;
+                    }
+                    _ => {
+                        label_end = self.lexer.span().end;
+                        self.bump();
+                    }
+                }
+            }
+
+            if closed {
+                let raw_label = self.lexer.source()[label_start..label_end].trim();
+                let text = if raw_label.is_empty() {
+                    raw_url
+                } else {
+                    raw_label
+                };
+
+                return Inline::Link { url: raw_url, text };
+            }
+        }
+
+        // malformed, output as literal text
+        let fallback_end = self.lexer.span().start;
+        let text = if fallback_end > open_span.start {
+            &self.lexer.source()[open_span.start..fallback_end]
+        } else {
+            "["
+        };
+        Inline::Text(text)
     }
 }
 // tested by good enough tm

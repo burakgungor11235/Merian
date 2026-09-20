@@ -69,6 +69,13 @@ impl Assembler {
                 | Inline::Underline(c)
                 | Inline::Strikethru(c) => Self::push_plain_text(c, out),
                 Inline::Code { content, .. } => out.push_str(content),
+                Inline::Link { url: _, text } => {
+                    if text.is_empty() {
+                        out.push_str("A link..")
+                    } else {
+                        out.push_str(text)
+                    }
+                }
             }
         }
     }
@@ -294,6 +301,7 @@ impl Assembler {
             Inline::Code { content, lang } => {
                 self.buffer.push_str("<code");
                 if let Some(lang) = lang {
+                    // I think we are vulnarable here.
                     self.buffer.push_str(" class=\"code-lang-");
                     self.escape_html(lang);
                     self.buffer.push('"');
@@ -301,6 +309,14 @@ impl Assembler {
                 self.buffer.push('>');
                 self.escape_html(content);
                 self.buffer.push_str("</code>");
+            }
+            Inline::Link { url, text } => {
+                self.buffer.push_str("<a href=");
+                self.buffer.push_str(url); // here too. 
+                self.buffer.push_str(">\n");
+
+                self.escape_html(text);
+                self.buffer.push_str("</a>");
             }
         }
     }
