@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.6.6", features = ["derive"] }
 logos = "0.16.1"
+giallo = { version = "0.5.2", features = ["dump"] }

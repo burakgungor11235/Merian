@@ -1,5 +1,6 @@
 use crate::ast::{Block, Document, Inline};
-use std::fmt::Write;
+use giallo::{HighlightOptions, HtmlRenderer, Registry, RenderOptions, ThemeVariant};
+use std::{fmt::Write, process::exit};
 
 const STYLE: &str = include_str!("data/merian-style.css");
 
@@ -8,13 +9,27 @@ const STYLE: &str = include_str!("data/merian-style.css");
 pub struct Assembler {
     buffer: String,
     heading_counters: Vec<usize>,
+    syntax_reg: Registry,
 }
 
 impl Assembler {
     pub fn new() -> Self {
+        let mut registry = match Registry::builtin() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!(
+                    "Merian::Assembler failed because of an error in syntax registry creation:\n{}",
+                    e
+                );
+                exit(-1); // propagate this properly in the future.
+            }
+        };
+
+        registry.link_grammars();
         Self {
             buffer: String::new(),
             heading_counters: Vec::new(),
+            syntax_reg: registry,
         }
     }
 
@@ -186,7 +201,7 @@ impl Assembler {
             self.buffer.push('"');
         }
         self.buffer.push('>');
-        self.escape_html(content);
+        self.buffer.push_str(&self.render_code(lang, content));
         self.buffer.push_str("</code></pre>\n</figure>\n");
     }
 
@@ -300,7 +315,7 @@ impl Assembler {
                 self.buffer.push_str("</del>");
             }
             Inline::Code { content, lang } => {
-                self.buffer.push_str("<code");
+                self.buffer.push_str("<code style=\"white-space: pre;\"");
                 if let Some(lang) = lang {
                     // I think we are vulnarable here.
                     self.buffer.push_str(" class=\"code-lang-");
@@ -308,7 +323,11 @@ impl Assembler {
                     self.buffer.push('"');
                 }
                 self.buffer.push('>');
-                self.escape_html(content);
+
+                let lang_tag = lang.as_deref().unwrap_or("txt");
+                self.buffer
+                    .push_str(&self.render_code_inner(lang_tag, content));
+
                 self.buffer.push_str("</code>");
             }
             Inline::Link { url, text } => {
@@ -340,6 +359,43 @@ impl Assembler {
                 _ => self.buffer.push(c),
             }
         }
+    }
+
+    fn render_code_inner(&self, lang: &str, content: &str) -> String {
+        let full_html = self.render_code(lang, content);
+
+        // Find the boundary after Giallo's opening
+        let content_start = full_html
+            .find("<code")
+            .and_then(|idx| full_html[idx..].find('>').map(|end| idx + end + 1))
+            .unwrap_or(0);
+
+        // Find the boundary before Giallo's closing
+        let content_end = full_html.rfind("</code>").unwrap_or(full_html.len());
+
+        if content_start < content_end {
+            full_html[content_start..content_end].to_string()
+        } else {
+            full_html
+        }
+    }
+
+    fn render_code(&self, lang: &str, content: &str) -> String {
+        let lang_to_use = if lang.is_empty() { "txt" } else { lang };
+        let options = HighlightOptions::new(lang_to_use, ThemeVariant::Single("catppuccin-latte"));
+
+        // Fallback to "txt" if the grammar is not found in the registry
+        let highlighted = self
+            .syntax_reg
+            .highlight(content, &options)
+            .or_else(|_| {
+                let fallback =
+                    HighlightOptions::new("txt", ThemeVariant::Single("catppuccin-latte"));
+                self.syntax_reg.highlight(content, &fallback)
+            })
+            .unwrap();
+
+        HtmlRenderer::default().render(&highlighted, &RenderOptions::default())
     }
 }
 

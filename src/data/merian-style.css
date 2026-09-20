@@ -3,14 +3,21 @@
   --sans: system-ui, -apple-system, sans-serif;
   --mono: ui-monospace, Menlo, Consolas, monospace;
 
-  /* taken from a random color generator */
-  --paper: #fbfaf8;
-  --ink: #1c1b19;
-  --muted: #5f5c69;
-  --hair: #8a877e;
-  --wash: #f0ede8;
-  --accent: #7a2231;
-  --select: #ecd5d9;
+  /* Catppuccin Latte */
+  --paper: #eff1f5;
+  /* Base */
+  --ink: #4c4f69;
+  /* Text */
+  --muted: #6c6f85;
+  /* Subtext 0 */
+  --hair: #9ca0b0;
+  /* Overlay 0 */
+  --wash: #e6e9ef;
+  /* Mantle */
+  --accent: #8839ef;
+  /* Mauve */
+  --select: #ccd0da;
+  /* Surface 0 */
 }
 
 body {
@@ -195,6 +202,11 @@ pre {
   overflow-x: auto;
   font-size: 0.9rem;
   line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 pre code {
@@ -239,4 +251,17 @@ h5:hover .anchor,
 h6:hover .anchor,
 .anchor:focus {
   opacity: 1;
+}
+
+.giallo-l {
+  display: inline-block;
+  min-height: 1lh;
+  width: 100%;
+  white-space: pre;
+}
+
+/* For inline code elements */
+code[style*="white-space: pre"] {
+  display: inline-block;
+  vertical-align: middle;
 }
