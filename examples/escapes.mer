@@ -1,0 +1,59 @@
+#1 Escapes
+
+Backslash + syntax = literal. Backslash + other = stays.
+
+#1.1 Inline style
+
+\**not bold\**, \__not italic\__, \==not underline\==, \~~not strike\~~.
+
+\`not code\`, \[not link\], \![not image\], \|not pipe.
+
+\/'not comment'\/.
+
+#1.2 Links and images
+
+Escaped `\|` and `\]` stay inside.
+
+[https://example.com|a\|b]
+[https://example.com|label with \] bracket]
+
+![https://example.com/a.jpg|alt\]text]
+
+#1.3 Block prefixes
+
+Backslash stops blocks.
+
+\> not quote
+\> still paragraph
+
+\#1 not heading
+
+\* not list
+\+ not list
+\- not list
+\^ not list
+\= not list
+
+\--- not rule
+
+\<! not codeblock
+
+\1. not ordered list
+
+\| not gutter
+
+#1.4 Backslash itself
+
+\\ = one backslash.
+
+C:\path stays. \a stays. Trailing \
+
+#1.5 Verbatim zones
+
+No unescape in code.
+
+`code \* stays`
+
+/' hidden '/
+
+/' a \'/ b '/ after comment
