@@ -73,8 +73,11 @@ pub enum Token<'a> {
     #[regex(r"---[ \t]*(?:\n|$)", priority = 21)]
     ThematicBreak,
 
+    #[token("\\", priority = 30)]
+    Backslash,
+
     // ON GOD THIS THING IS GOING TO BE HUGE AT THE END OF THIS. MY HEAD IS HURTING.
-    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>|+^.=-]+"#)]
+    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>|+^.=\\-]+"#)]
     Text(&'a str),
 
     #[regex(r"[#_~/']")]

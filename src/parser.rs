@@ -1,9 +1,10 @@
 use logos::Logos;
+use std::borrow::Cow;
 use std::collections::VecDeque;
 
 use crate::{
     ast::{AutoSymbol, Block, Document, DocumentMetadata, Inline, ListItem, ListMarker},
-    lexer::Token::{self, CommentEnd},
+    lexer::Token::{self},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,7 +166,69 @@ fn is_text_token(token: &Token<'_>) -> bool {
             | Token::ParagraphBreak // add tokens that shouldn't be treated as text.
             | Token::LBracket
             | Token::ImageOpen
+            | Token::Backslash
     )
+}
+
+fn is_escape_punct(c: char) -> bool {
+    matches!(
+        c,
+        '!' | '"'
+            | '#'
+            | '$'
+            | '%'
+            | '&'
+            | '\''
+            | '('
+            | ')'
+            | '*'
+            | '+'
+            | ','
+            | '-'
+            | '.'
+            | '/'
+            | ':'
+            | ';'
+            | '<'
+            | '='
+            | '>'
+            | '?'
+            | '@'
+            | '['
+            | '\\'
+            | ']'
+            | '^'
+            | '_'
+            | '`'
+            | '{'
+            | '|'
+            | '}'
+            | '~'
+    )
+}
+
+fn unescape<'a>(s: &'a str) -> Cow<'a, str> {
+    if !s.contains('\\') {
+        return Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.peek() {
+                Some(next) if is_escape_punct(*next) => {
+                    out.push(*next);
+                    chars.next();
+                }
+                _ => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    // mooo
+    Cow::Owned(out)
 }
 pub struct Parser<'a> {
     lexer: logos::Lexer<'a, Token<'a>>,
@@ -606,13 +669,22 @@ impl<'a> Parser<'a> {
     }
     /// skip comments, set current pos to comment + 1
     fn skip_comments(&mut self) {
-        println!("{:?}", self.current);
-        while self.current.is_some() && self.current != Some(Token::CommentEnd) {
-            println!("{:?}", self.current);
-            self.bump();
-        }
-        if self.current == Some(CommentEnd) {
-            self.bump();
+        loop {
+            match &self.current {
+                None => break,
+                Some(Token::CommentEnd) => {
+                    self.bump();
+                    break;
+                }
+                Some(Token::Backslash) => {
+                    self.bump();
+                    match &self.current {
+                        None => break,
+                        Some(_) => self.bump(),
+                    }
+                }
+                Some(_) => self.bump(),
+            }
         }
     }
 
@@ -948,6 +1020,63 @@ impl<'a> Parser<'a> {
             Some(Inline::Text("`"))
         }
     }
+    fn parse_escape(&mut self) -> Option<Inline<'a>> {
+        debug_assert_eq!(self.current, Some(Token::Backslash));
+        self.bump(); // \
+        if let Some(Token::Text(digits)) = &self.current
+            && digits.chars().all(|c| c.is_ascii_digit())
+        {
+            let rem = self.lexer.remainder();
+            if rem.starts_with('.') && rem[1..].starts_with([' ', '\t']) {
+                let start = self.lexer.span().start;
+                self.bump();
+
+                if self.current == Some(Token::Dot) {
+                    let end = self.lexer.span().end;
+                    self.bump(); // consume `.`
+                    return Some(Inline::Text(&self.lexer.source()[start..end]));
+                }
+                // Dot went missing ): fall through to lone `\`.
+            }
+        }
+
+        let lit: Option<&'a str> = match &self.current {
+            Some(Token::Bold) => Some("**"),
+            Some(Token::Italic) => Some("__"),
+            Some(Token::Underline) => Some("=="),
+            Some(Token::Striketrhu) => Some("~~"),
+            Some(Token::Backtick) => Some("`"),
+            Some(Token::LBracket) => Some("["),
+            Some(Token::RBracket) => Some("]"),
+            Some(Token::ImageOpen) => Some("!["),
+            Some(Token::CommentStart) => Some("/'"),
+            Some(Token::CommentEnd) => Some("'/"),
+            Some(Token::BiggerThan) => Some(">"),
+            Some(Token::SmallerThan) => Some("<"),
+            Some(Token::Pipe) => Some("|"),
+            Some(Token::Plus) => Some("+"),
+            Some(Token::Minus) => Some("-"),
+            Some(Token::Caret) => Some("^"),
+            Some(Token::Equals) => Some("="),
+            Some(Token::Dot) => Some("."),
+            Some(Token::Star) => Some("*"),
+            Some(Token::CodeBlockStart) => Some("<!"),
+            Some(Token::ThematicBreak) => Some("---"),
+            Some(Token::HeadingMarker(s)) => Some(*s),
+            Some(Token::Punctuation(s)) => Some(*s),
+            Some(Token::Backslash) => Some("\\"),
+            _ => None,
+        };
+
+        match lit {
+            Some(text) => {
+                self.bump();
+                Some(Inline::Text(text))
+            }
+            None => Some(Inline::Text("\\")),
+        }
+    }
+
     fn parse_inline(&mut self) -> Option<Inline<'a>> {
         if let Some(tok) = &self.current
             && is_text_token(tok)
@@ -971,6 +1100,8 @@ impl<'a> Parser<'a> {
 
         match self.current {
             Some(Token::Backtick) => self.parse_inline_code(),
+
+            Some(Token::Backslash) => self.parse_escape(),
 
             Some(Token::CommentStart) => {
                 self.skip_comments();
@@ -1060,42 +1191,57 @@ impl<'a> Parser<'a> {
         let mut has_pipe = false;
         let mut closed = false;
 
-        while let Some(tok) = &self.current {
-            match tok {
-                Token::Pipe => {
+        while self.current.is_some() {
+            if self.current == Some(Token::Backslash) {
+                url_end = self.lexer.span().end;
+                self.bump(); // consume `\`
+                match &self.current {
+                    None => break,
+                    Some(Token::Newline | Token::ParagraphBreak) => break,
+                    Some(_) => {
+                        url_end = self.lexer.span().end;
+                        self.bump();
+                    }
+                }
+                continue;
+            }
+            match &self.current {
+                Some(Token::Pipe) => {
                     has_pipe = true;
                     url_end = self.lexer.span().start;
 
                     self.bump(); // consume '|'
                     break;
                 }
-                Token::RBracket => {
+                Some(Token::RBracket) => {
                     url_end = self.lexer.span().start;
                     self.bump(); // consume ']'
                     closed = true;
 
                     break;
                 }
-                Token::Newline | Token::ParagraphBreak => {
+                Some(Token::Newline | Token::ParagraphBreak) => {
                     // Links cannot cross lines/paragraphs
 
                     break;
                 }
-                _ => {
+                Some(_) => {
                     url_end = self.lexer.span().end;
 
                     self.bump();
                 }
+                None => break,
             }
         }
 
-        let raw_url = self.lexer.source()[url_start..url_end].trim();
+        let raw_url_trimmed = self.lexer.source()[url_start..url_end].trim();
+        let url: Cow<'a, str> = unescape(raw_url_trimmed);
 
         // Autolink
-        if closed && !raw_url.is_empty() {
+        if closed && !url.is_empty() {
             return Inline::Link {
-                url: raw_url,
-                text: raw_url, // Text defaults to URL
+                text: url.clone(),
+                url,
             };
         }
 
@@ -1105,33 +1251,48 @@ impl<'a> Parser<'a> {
             let label_start = self.lexer.span().start;
             let mut label_end = label_start;
 
-            while let Some(tok) = &self.current {
-                match tok {
-                    Token::RBracket => {
+            while self.current.is_some() {
+                if self.current == Some(Token::Backslash) {
+                    label_end = self.lexer.span().end;
+                    self.bump();
+                    match &self.current {
+                        None => break,
+                        Some(Token::Newline | Token::ParagraphBreak) => break,
+                        Some(_) => {
+                            label_end = self.lexer.span().end;
+                            self.bump();
+                        }
+                    }
+                    continue;
+                }
+                match &self.current {
+                    Some(Token::RBracket) => {
                         label_end = self.lexer.span().start;
                         self.bump(); // consume ']'
                         closed = true;
                         break;
                     }
-                    Token::Newline | Token::ParagraphBreak => {
+                    Some(Token::Newline | Token::ParagraphBreak) => {
                         break;
                     }
-                    _ => {
+                    Some(_) => {
                         label_end = self.lexer.span().end;
                         self.bump();
                     }
+                    None => break,
                 }
             }
 
             if closed {
-                let raw_label = self.lexer.source()[label_start..label_end].trim();
-                let text = if raw_label.is_empty() {
-                    raw_url
+                let raw_label_trimmed = self.lexer.source()[label_start..label_end].trim();
+                let unescaped_label: Cow<'a, str> = unescape(raw_label_trimmed);
+                let text = if unescaped_label.is_empty() {
+                    url.clone()
                 } else {
-                    raw_label
+                    unescaped_label
                 };
 
-                return Inline::Link { url: raw_url, text };
+                return Inline::Link { url, text };
             }
         }
 
@@ -1161,52 +1322,80 @@ impl<'a> Parser<'a> {
         let mut has_pipe = false;
         let mut closed = false;
 
-        while let Some(tok) = &self.current {
-            match tok {
-                Token::Pipe => {
+        while self.current.is_some() {
+            if self.current == Some(Token::Backslash) {
+                url_end = self.lexer.span().end;
+                self.bump();
+                match &self.current {
+                    None => break,
+                    Some(Token::Newline | Token::ParagraphBreak) => break,
+                    Some(_) => {
+                        url_end = self.lexer.span().end;
+                        self.bump();
+                    }
+                }
+                continue;
+            }
+            match &self.current {
+                Some(Token::Pipe) => {
                     has_pipe = true;
                     url_end = self.lexer.span().start;
                     self.bump();
                     break;
                 }
-                Token::RBracket => {
+                Some(Token::RBracket) => {
                     url_end = self.lexer.span().start;
                     self.bump();
                     closed = true;
                     break;
                 }
-                Token::Newline | Token::ParagraphBreak => break,
-                _ => {
+                Some(Token::Newline | Token::ParagraphBreak) => break,
+                Some(_) => {
                     url_end = self.lexer.span().end;
                     self.bump();
                 }
+                None => break,
             }
         }
 
-        let img_source = self.lexer.source()[url_start..url_end].trim();
-        let mut alt = "";
+        let img_source: Cow<'a, str> = unescape(self.lexer.source()[url_start..url_end].trim());
+        let mut alt: Cow<'a, str> = Cow::Borrowed("");
 
         if has_pipe {
             self.skip_whitespace();
             let alt_start = self.lexer.span().start;
             let mut alt_end = alt_start;
 
-            while let Some(tok) = &self.current {
-                match tok {
-                    Token::RBracket => {
+            while self.current.is_some() {
+                if self.current == Some(Token::Backslash) {
+                    alt_end = self.lexer.span().end;
+                    self.bump();
+                    match &self.current {
+                        None => break,
+                        Some(Token::Newline | Token::ParagraphBreak) => break,
+                        Some(_) => {
+                            alt_end = self.lexer.span().end;
+                            self.bump();
+                        }
+                    }
+                    continue;
+                }
+                match &self.current {
+                    Some(Token::RBracket) => {
                         alt_end = self.lexer.span().start;
                         self.bump();
                         closed = true;
                         break;
                     }
-                    Token::Newline | Token::ParagraphBreak => break,
-                    _ => {
+                    Some(Token::Newline | Token::ParagraphBreak) => break,
+                    Some(_) => {
                         alt_end = self.lexer.span().end;
                         self.bump();
                     }
+                    None => break,
                 }
             }
-            alt = self.lexer.source()[alt_start..alt_end].trim();
+            alt = unescape(self.lexer.source()[alt_start..alt_end].trim());
         }
 
         if !closed || img_source.is_empty() {

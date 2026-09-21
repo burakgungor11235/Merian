@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{self, Display};
 
 #[derive(Debug)]
@@ -98,12 +99,14 @@ pub enum Inline<'a> {
         content: &'a str,
         lang: Option<&'a str>,
     },
+    // I added Cow for rollback.
+    // If somebody has a better solution please create a PR.
     Link {
-        url: &'a str,  // hoist up to a url enum / struct in the future.
-        text: &'a str, // text has to be optional but eeeeh
+        url: Cow<'a, str>,  // hoist up to a url enum / struct in the future.
+        text: Cow<'a, str>, // text has to be optional but eeeeh
     },
     Image {
-        img_source: &'a str,
-        alt: &'a str,
+        img_source: Cow<'a, str>,
+        alt: Cow<'a, str>,
     },
 }
