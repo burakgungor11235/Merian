@@ -1,0 +1,36 @@
+#1 Generic title
+
+Generic text written in a generic tone for generic purposes just for you. 
+It needs to look generic because I have no idea what to write about.
+I mean you're still reading this this is just fantastic. Like why are you 
+still reading this. My goodness please just stop reading this paragraph 
+
+1. this is a list 
+-. this is also a list.
++. wow this is also a list.
+4.+ yeah things are pretty generic here
+
+> Hi I'm Mr. Generic and I do generic stuff like 
+> <!python: generic
+@dataclass(frozen=true)
+class PrettyGenericStuff:
+  x: int 
+  y: int 
+  
+def pretty_specific_function[T] \
+    (deffinetly_non_generic_input: T) -> T:
+  return 0
+!>
+
+Sooo thats about it. This is a __generic__ text like what you expect. 
+~~something specific?~~
+
+Is this generic enough?
+
+* here are the steps to being **generic**
+| take notes because it's really ==important==
+
+wow
+
++ Be generic 
+* thank you.
