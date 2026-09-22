@@ -1,14 +1,18 @@
-use crate::ast::{Block, Document, Inline};
 use giallo::{HighlightOptions, HtmlRenderer, Registry, RenderOptions, ThemeVariant};
 use std::{fmt::Write, process::exit};
 
+use crate::backend::rir::{RBlock, RInline, RListItem, ResolvedDoc};
+
 const STYLE: &str = include_str!("data/merian-style.css");
 
-// This puts the ass in assembler
+/// Any backend consumes the resolved IR and produces its own output.
+pub trait Backend {
+    type Out;
+    fn emit(self, doc: &ResolvedDoc) -> Self::Out;
+}
 
 pub struct Assembler {
     buffer: String,
-    heading_counters: Vec<usize>,
     syntax_reg: Registry,
 }
 
@@ -22,27 +26,25 @@ impl Assembler {
                     e
                 );
                 exit(-1); // propagate this properly in the future.
+                // _yeet_
             }
         };
 
         registry.link_grammars();
         Self {
             buffer: String::new(),
-            heading_counters: Vec::new(),
             syntax_reg: registry,
         }
     }
 
-    pub fn assemble(mut self, doc: &Document) -> String {
-        let title = Self::document_title(doc).unwrap_or_else(|| "Merian".to_string());
-
+    pub fn assemble(mut self, doc: &ResolvedDoc) -> String {
         self.buffer.push_str("<!doctype html>\n");
         self.buffer.push_str("<html lang=\"en\">\n<head>\n");
         self.buffer.push_str("<meta charset=\"utf-8\">\n");
         self.buffer
             .push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
         self.buffer.push_str("<title>");
-        self.escape_html(&title);
+        self.escape_html(&doc.title);
         self.buffer.push_str("</title>\n<style>\n");
         self.buffer.push_str(STYLE);
         self.buffer.push_str("\n</style>\n</head>\n<body>\n");
@@ -50,126 +52,59 @@ impl Assembler {
             .push_str("<a class=\"skip-link\" href=\"#main\">Skip to content</a>\n");
         self.buffer.push_str("<main id=\"main\">\n");
 
-        for (i, block) in doc.blocks.iter().enumerate() {
-            let chunk_id = i + 1;
+        for chunk in &doc.chunks {
             writeln!(
                 self.buffer,
-                "<section id=\"{chunk_id}\" class=\"merian-chunk\" data-chunk=\"{chunk_id}\">"
+                "<section id=\"{}\" class=\"merian-chunk\" data-chunk=\"{}\">",
+                chunk.id, chunk.id
             )
             .unwrap();
-            self.render_block(block);
+            self.render_block(&chunk.kind);
             self.buffer.push_str("</section>\n\n");
         }
 
         self.buffer.push_str("</main>\n");
         self.buffer.push_str("</body>\n</html>\n");
 
-        self.buffer
+        std::mem::take(&mut self.buffer)
     }
 
-    fn document_title(doc: &Document) -> Option<String> {
-        for block in &doc.blocks {
-            if let Block::Heading { content, .. } = block {
-                let mut s = String::new();
-                Self::push_plain_text(content, &mut s);
-                let t = s.trim().to_string();
-                if !t.is_empty() {
-                    return Some(t);
-                }
-            }
-        }
-        None
-    }
-
-    fn push_plain_text(inlines: &[Inline], out: &mut String) {
-        for inline in inlines {
-            match inline {
-                Inline::Text(t) => out.push_str(t),
-                Inline::Bold(c)
-                | Inline::Italic(c)
-                | Inline::Underline(c)
-                | Inline::Strikethru(c) => Self::push_plain_text(c, out),
-                Inline::Code { content, .. } => out.push_str(content),
-                Inline::Link { url: _, text } => {
-                    if text.is_empty() {
-                        out.push_str("A link..")
-                    } else {
-                        out.push_str(text)
-                    }
-                }
-                Inline::Image { alt, .. } => out.push_str(alt),
-                Inline::ChunkRef { target } => {
-                    out.push('&');
-                    out.push_str(&target.to_string());
-                }
-            }
-        }
-    }
-
-    /// Computes the coordinate ID for headings
-    /// in the future it should be taken from the IR.
-    fn next_heading_permalink(&mut self, level: usize) -> String {
-        if self.heading_counters.len() < level {
-            while self.heading_counters.len() < level - 1 {
-                self.heading_counters.push(1);
-            }
-            self.heading_counters.push(1);
-        } else {
-            self.heading_counters.truncate(level);
-            if let Some(last) = self.heading_counters.last_mut() {
-                *last += 1;
-            }
-        }
-
-        self.heading_counters
-            .iter()
-            .map(|n| n.to_string())
-            .collect::<Vec<_>>()
-            .join(".")
-    }
-
-    fn render_block(&mut self, block: &Block) {
+    fn render_block(&mut self, block: &RBlock) {
         match block {
-            Block::Heading { level, content } => {
-                let level = (*level).clamp(1, 6);
-                let permalink = self.next_heading_permalink(level);
-
-                write!(self.buffer, "<h{} id=\"heading-{}\">", level, permalink).unwrap();
-                self.render_inlines(content);
+            RBlock::Heading {
+                level,
+                permalink,
+                inlines,
+            } => {
+                write!(self.buffer, "<h{level} id=\"heading-{permalink}\">").unwrap();
+                self.render_inlines(inlines);
                 write!(
                     self.buffer,
-                    "<a class=\"anchor\" href=\"#heading-{}\" aria-label=\"Permalink to section {}\">#</a>",
-                    permalink, permalink
+                    "<a class=\"anchor\" href=\"#heading-{permalink}\" aria-label=\"Permalink to section {permalink}\">#</a>",
                 )
                 .unwrap();
-                writeln!(self.buffer, "</h{}>", level).unwrap();
+                writeln!(self.buffer, "</h{level}>").unwrap();
             }
-            Block::Paragraph(content) => {
+            RBlock::Paragraph(content) => {
                 self.buffer.push_str("<p>");
                 self.render_inlines(content);
                 self.buffer.push_str("</p>\n");
             }
-            Block::Quote { level, content } => self.render_quote(*level, content),
-            Block::CodeBlock {
-                lang,
-                title,
-                content,
-            } => {
-                self.render_code_block(lang, *title, content);
+            RBlock::Quote { level, body } => self.render_quote(*level, body),
+            RBlock::Code { lang, title, src } => {
+                self.render_code_block(lang, title.as_deref(), src);
             }
-            Block::List { items } => {
+            RBlock::List { items } => {
                 self.render_list(items);
             }
-            Block::ThematicBreak => self.buffer.push_str("<hr>\n"),
+            RBlock::Rule => self.buffer.push_str("<hr>\n"),
         }
     }
 
-    fn render_quote(&mut self, level: i32, content: &[Block]) {
-        let safe_level = level.max(1);
-
+    fn render_quote(&mut self, level: u8, content: &[RBlock]) {
         writeln!(
             self.buffer,
-            "<blockquote class=\"merian-quote\" data-level=\"{safe_level}\">"
+            "<blockquote class=\"merian-quote\" data-level=\"{level}\">"
         )
         .unwrap();
 
@@ -181,9 +116,6 @@ impl Assembler {
     }
 
     fn render_code_block(&mut self, lang: &str, title: Option<&str>, content: &str) {
-        let lang = lang.trim();
-        let title = title.map(str::trim).filter(|t| !t.is_empty());
-
         self.buffer.push_str("<figure class=\"code-block\">\n");
 
         if title.is_some() || !lang.is_empty() {
@@ -215,14 +147,14 @@ impl Assembler {
         self.buffer.push_str("</code></pre>\n</figure>\n");
     }
 
-    fn render_list(&mut self, items: &[crate::ast::ListItem]) {
+    fn render_list(&mut self, items: &[RListItem]) {
         struct Level {
             depth: usize,
             ordered: bool,
             li_open: bool,
         }
         impl Level {
-            fn tag(&self) -> &'static str {
+            fn tag(&self) -> &str {
                 if self.ordered { "ol" } else { "ul" }
             }
         }
@@ -241,7 +173,7 @@ impl Assembler {
 
         for item in items {
             let depth = item.depth;
-            let ordered = !item.marker.is_unordered();
+            let ordered = item.ordered;
 
             while stack
                 .last()
@@ -274,9 +206,10 @@ impl Assembler {
                 "<li class=\"merian-list-item\" data-depth=\"{depth}\" role=\"listitem\">"
             )
             .unwrap();
+
             if ordered {
                 self.buffer.push_str("<span class=\"marker\">");
-                self.escape_html(&item.marker.to_string());
+                self.escape_html(&item.marker);
                 self.buffer.push_str("</span>\n");
             } else {
                 self.buffer
@@ -284,7 +217,7 @@ impl Assembler {
             }
 
             self.buffer.push_str("<div class=\"content\">\n");
-            for block in &item.blocks {
+            for block in &item.body {
                 self.render_block(block);
             }
             self.buffer.push_str("</div>\n");
@@ -295,36 +228,36 @@ impl Assembler {
         }
     }
 
-    fn render_inlines(&mut self, inlines: &[Inline]) {
+    fn render_inlines(&mut self, inlines: &[RInline]) {
         for inline in inlines {
             self.render_inline(inline);
         }
     }
 
-    fn render_inline(&mut self, inline: &Inline) {
+    fn render_inline(&mut self, inline: &RInline) {
         match inline {
-            Inline::Text(text) => self.escape_html(text),
-            Inline::Bold(content) => {
+            RInline::Text(text) => self.escape_html(text),
+            RInline::Bold(content) => {
                 self.buffer.push_str("<strong>");
                 self.render_inlines(content);
                 self.buffer.push_str("</strong>");
             }
-            Inline::Italic(content) => {
+            RInline::Italic(content) => {
                 self.buffer.push_str("<em>");
                 self.render_inlines(content);
                 self.buffer.push_str("</em>");
             }
-            Inline::Underline(content) => {
+            RInline::Underline(content) => {
                 self.buffer.push_str("<u>");
                 self.render_inlines(content);
                 self.buffer.push_str("</u>");
             }
-            Inline::Strikethru(content) => {
+            RInline::Strike(content) => {
                 self.buffer.push_str("<del>");
                 self.render_inlines(content);
                 self.buffer.push_str("</del>");
             }
-            Inline::Code { content, lang } => {
+            RInline::Code { src, lang } => {
                 self.buffer.push_str("<code style=\"white-space: pre;\"");
                 if let Some(lang) = lang {
                     // I think we are vulnarable here.
@@ -335,32 +268,39 @@ impl Assembler {
                 self.buffer.push('>');
 
                 let lang_tag = lang.as_deref().unwrap_or("txt");
-                self.buffer
-                    .push_str(&self.render_code_inner(lang_tag, content));
+                self.buffer.push_str(&self.render_code_inner(lang_tag, src));
 
                 self.buffer.push_str("</code>");
             }
-            Inline::Link { url, text } => {
+            RInline::Link { url, text } => {
                 self.buffer.push_str("<a href=");
-                self.escape_html(url); // here too. 
+                self.escape_html(url); // here too.
                 self.buffer.push_str(">\n");
 
                 self.escape_html(text);
                 self.buffer.push_str("</a>");
             }
-            Inline::Image { img_source, alt } => {
+            RInline::Image { src, alt } => {
                 self.buffer.push_str("<img src=\"");
-                self.escape_html(img_source);
+                self.escape_html(src);
                 self.buffer.push_str("\" alt=\"");
                 self.escape_html(alt);
                 self.buffer.push_str("\">");
             }
-            Inline::ChunkRef { target } => {
-                write!(
-                    self.buffer,
-                    "<a class=\"chunk-ref\" href=\"#{target}\">&{target}</a>"
-                )
-                .unwrap();
+            RInline::Ref { target, exists } => {
+                if *exists {
+                    write!(
+                        self.buffer,
+                        "<a class=\"chunk-ref\" href=\"#{target}\">&{target}</a>"
+                    )
+                    .unwrap();
+                } else {
+                    write!(
+                        self.buffer,
+                        "<span class=\"broken-ref\" data-target=\"{target}\">&{target}</span>"
+                    )
+                    .unwrap();
+                }
             }
         }
     }
@@ -413,6 +353,13 @@ impl Assembler {
             .unwrap();
 
         HtmlRenderer::default().render(&highlighted, &RenderOptions::default())
+    }
+}
+
+impl Backend for Assembler {
+    type Out = String;
+    fn emit(self, doc: &ResolvedDoc) -> String {
+        self.assemble(doc)
     }
 }
 
