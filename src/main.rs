@@ -4,8 +4,12 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
+use crate::backend::ast_to_ir_lower::lower;
+use crate::backend::resolver::resolve;
+
 mod assembler;
 mod ast;
+mod backend;
 mod lexer;
 mod parser;
 
@@ -21,6 +25,14 @@ struct Cli {
     /// Dump the AST
     #[arg(long = "dump-ast")]
     dump_ast: bool,
+
+    /// Dump the unresolved IR
+    #[arg(long = "dump-ir")]
+    dump_ir: bool,
+
+    /// Dump the resolved IR
+    #[arg(long = "dump-resolved")]
+    dump_resolved: bool,
 
     /// Dump tokens
     #[arg(long = "dump-tokens")]
@@ -76,7 +88,20 @@ fn run(cli: &Cli) {
         println!("{doc:#?}");
     }
 
-    let html_output = assembler::Assembler::default().assemble(&doc);
+    let ir = lower(&doc);
+    if cli.dump_ir {
+        println!("{ir:#?}");
+    }
+
+    let (resolved, diags) = resolve(ir);
+    for d in &diags {
+        eprintln!("warning: {d}");
+    }
+    if cli.dump_resolved {
+        println!("{resolved:#?}");
+    }
+
+    let html_output = assembler::Backend::emit(assembler::Assembler::default(), &resolved);
 
     match &cli.output {
         Some(out_path) => {
