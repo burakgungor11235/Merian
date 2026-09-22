@@ -2,5 +2,5 @@
 
 A markup language
 
-## License 
-Copyright © 2026 Burak Güngör. Licensed under the [European Union Public Licence v. 1.2 (EUPL-1.2)](LICENSE).
+## License
+This project is licensed under the GNU General Public License v3.0, see the [LICENSE](LICENSE) file for details.
