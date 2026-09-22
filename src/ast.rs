@@ -91,6 +91,10 @@ pub struct ListItem<'a> {
 pub enum Inline<'a> {
     Text(&'a str),
 
+    ChunkRef {
+        target: usize,
+    },
+
     Bold(Vec<Inline<'a>>),
     Italic(Vec<Inline<'a>>),
     Strikethru(Vec<Inline<'a>>),

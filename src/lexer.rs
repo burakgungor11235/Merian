@@ -76,8 +76,11 @@ pub enum Token<'a> {
     #[token("\\", priority = 30)]
     Backslash,
 
+    #[token("&", priority = 20)]
+    Ampersand,
+
     // ON GOD THIS THING IS GOING TO BE HUGE AT THE END OF THIS. MY HEAD IS HURTING.
-    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>|+^.=\\-]+"#)]
+    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>|+^.=\\\-&]+"#)]
     Text(&'a str),
 
     #[regex(r"[#_~/']")]

@@ -50,9 +50,15 @@ impl Assembler {
             .push_str("<a class=\"skip-link\" href=\"#main\">Skip to content</a>\n");
         self.buffer.push_str("<main id=\"main\">\n");
 
-        for block in &doc.blocks {
+        for (i, block) in doc.blocks.iter().enumerate() {
+            let chunk_id = i + 1;
+            writeln!(
+                self.buffer,
+                "<section id=\"{chunk_id}\" class=\"merian-chunk\" data-chunk=\"{chunk_id}\">"
+            )
+            .unwrap();
             self.render_block(block);
-            self.buffer.push('\n');
+            self.buffer.push_str("</section>\n\n");
         }
 
         self.buffer.push_str("</main>\n");
@@ -92,6 +98,10 @@ impl Assembler {
                     }
                 }
                 Inline::Image { alt, .. } => out.push_str(alt),
+                Inline::ChunkRef { target } => {
+                    out.push('&');
+                    out.push_str(&target.to_string());
+                }
             }
         }
     }
@@ -124,11 +134,11 @@ impl Assembler {
                 let level = (*level).clamp(1, 6);
                 let permalink = self.next_heading_permalink(level);
 
-                write!(self.buffer, "<h{} id=\"{}\">", level, permalink).unwrap();
+                write!(self.buffer, "<h{} id=\"heading-{}\">", level, permalink).unwrap();
                 self.render_inlines(content);
                 write!(
                     self.buffer,
-                    "<a class=\"anchor\" href=\"#{}\" aria-label=\"Permalink to section {}\">#</a>",
+                    "<a class=\"anchor\" href=\"#heading-{}\" aria-label=\"Permalink to section {}\">#</a>",
                     permalink, permalink
                 )
                 .unwrap();
@@ -344,6 +354,13 @@ impl Assembler {
                 self.buffer.push_str("\" alt=\"");
                 self.escape_html(alt);
                 self.buffer.push_str("\">");
+            }
+            Inline::ChunkRef { target } => {
+                write!(
+                    self.buffer,
+                    "<a class=\"chunk-ref\" href=\"#{target}\">&{target}</a>"
+                )
+                .unwrap();
             }
         }
     }

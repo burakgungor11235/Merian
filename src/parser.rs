@@ -167,6 +167,7 @@ fn is_text_token(token: &Token<'_>) -> bool {
             | Token::LBracket
             | Token::ImageOpen
             | Token::Backslash
+            | Token::Ampersand
     )
 }
 
@@ -1061,6 +1062,7 @@ impl<'a> Parser<'a> {
             Some(Token::Dot) => Some("."),
             Some(Token::Star) => Some("*"),
             Some(Token::CodeBlockStart) => Some("<!"),
+            Some(Token::Ampersand) => Some("&"),
             Some(Token::ThematicBreak) => Some("---"),
             Some(Token::HeadingMarker(s)) => Some(*s),
             Some(Token::Punctuation(s)) => Some(*s),
@@ -1119,8 +1121,27 @@ impl<'a> Parser<'a> {
 
             Some(Token::LBracket) => Some(self.parse_link()),
             Some(Token::ImageOpen) => Some(self.parse_image()),
+            Some(Token::Ampersand) => Some(self.parse_chunk_ref()),
             _ => None,
         }
+    }
+
+    // WIP
+    fn parse_chunk_ref(&mut self) -> Inline<'a> {
+        let amp_end = self.lexer.span().end;
+        self.bump(); // &
+        if let Some(Token::Text(digits)) = self.current {
+            let span = self.lexer.span();
+            if span.start == amp_end
+                && !digits.is_empty()
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && let Ok(n) = digits.parse::<usize>()
+            {
+                self.bump(); // consume digits
+                return Inline::ChunkRef { target: n };
+            }
+        }
+        Inline::Text("&")
     }
 
     fn parse_delimited<F>(&mut self, delimiter: Delimiter, make_inline: F) -> Inline<'a>
