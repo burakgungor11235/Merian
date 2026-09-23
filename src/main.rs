@@ -4,14 +4,10 @@ use std::path::PathBuf;
 
 use clap::Parser;
 
-use crate::backend::ast_to_ir_lower::lower;
-use crate::backend::resolver::resolve;
-
-mod assembler;
-mod ast;
-mod backend;
-mod lexer;
-mod parser;
+use merian_lang::assembler;
+use merian_lang::backend::ast_to_ir_lower::lower;
+use merian_lang::backend::resolver::resolve;
+use merian_lang::{lexer, parser};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
