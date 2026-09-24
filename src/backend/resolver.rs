@@ -1,10 +1,16 @@
-use crate::backend::{
-    ir::{
-        IrBlock, IrChunk, IrDoc,
-        IrInline::{self, *},
-        IrListItem,
+use crate::{
+    backend::{
+        ir::{
+            IrBlock, IrChunk, IrDoc,
+            IrInline::{self, *},
+            IrListItem,
+        },
+        rir::{RBlock, RChunk, RInline, RListItem, ResolvedDoc},
     },
-    rir::{RBlock, RChunk, RInline, RListItem, ResolvedDoc},
+    math::{
+        handler::handle_math,
+        rir::{RMathResult, write_plain_text},
+    },
 };
 
 // right now this file is technically a placeholder, we are doing pretty much nothing.
@@ -14,13 +20,13 @@ use crate::backend::{
 
 pub fn resolve(ir: IrDoc) -> (ResolvedDoc, Vec<String>) {
     let count = ir.chunks.len();
-    let title = document_title(&ir).unwrap_or_else(|| "Merian".to_string());
     let mut diags = Vec::new();
-    let chunks = ir
+    let chunks: Vec<RChunk> = ir
         .chunks
         .into_iter()
         .map(|c| resolve_chunk(c, count, &mut diags))
         .collect();
+    let title = document_title(&chunks).unwrap_or_else(|| "Merian".to_string());
     (ResolvedDoc { title, chunks }, diags)
 }
 
@@ -98,12 +104,16 @@ fn resolve_inline(inline: IrInline, count: usize, diags: &mut Vec<String>) -> RI
         Code { src, lang } => RInline::Code { src, lang },
         Link { url, text } => RInline::Link { url, text },
         Image { src, alt } => RInline::Image { src, alt },
+        Math(source) => match handle_math(&source) {
+            Ok(expression) => RInline::Math(RMathResult::Display(expression)),
+            Err(error) => RInline::Error(error),
+        },
     }
 }
 
-fn document_title(ir: &IrDoc) -> Option<String> {
-    for chunk in &ir.chunks {
-        if let IrBlock::Heading { inlines, .. } = &chunk.kind {
+fn document_title(chunks: &[RChunk]) -> Option<String> {
+    for chunk in chunks {
+        if let RBlock::Heading { inlines, .. } = &chunk.kind {
             let mut s = String::new();
             push_plain_text(inlines, &mut s);
             let t = s.trim().to_string();
@@ -115,21 +125,27 @@ fn document_title(ir: &IrDoc) -> Option<String> {
     None
 }
 
-fn push_plain_text(inlines: &[IrInline], out: &mut String) {
+fn push_plain_text(inlines: &[RInline], out: &mut String) {
     for inline in inlines {
         match inline {
-            Text(t) => out.push_str(t),
-            Bold(c) | Italic(c) | Underline(c) | Strike(c) => push_plain_text(c, out),
-            Code { src, .. } => out.push_str(src),
-            Link { text, .. } => {
+            RInline::Text(t) => out.push_str(t),
+            RInline::Bold(c) | RInline::Italic(c) | RInline::Underline(c) | RInline::Strike(c) => {
+                push_plain_text(c, out)
+            }
+            RInline::Code { src, .. } => out.push_str(src),
+            RInline::Link { text, .. } => {
                 if text.is_empty() {
                     out.push_str("A link c:")
                 } else {
                     out.push_str(text)
                 }
             }
-            Image { alt, .. } => out.push_str(alt),
-            Ref(target) => {
+            RInline::Image { alt, .. } => out.push_str(alt),
+            RInline::Math(result) => write_plain_text(result, out),
+            RInline::Error(error) => {
+                out.push_str(error.source.as_deref().unwrap_or(&error.message));
+            }
+            RInline::Ref { target, .. } => {
                 out.push('&');
                 out.push_str(&target.to_string());
             }
@@ -141,6 +157,12 @@ fn push_plain_text(inlines: &[IrInline], out: &mut String) {
 mod tests {
     use super::*;
     use crate::backend::ir::{IrChunk, IrDoc};
+    use crate::backend::rir::{RError, RErrorKind};
+    use crate::math::{
+        MathMode,
+        ir::IrMathSource,
+        rir::{RMathExpr, RMathResult},
+    };
 
     fn doc_with_refs(targets: &[usize], count: usize) -> IrDoc {
         IrDoc {
@@ -183,12 +205,72 @@ mod tests {
 
     #[test]
     fn zero_is_borked() {
-        // Le vent se lève !
-        //      ... il faut tenter de vivre !
         let (resolved, _) = resolve(doc_with_refs(&[0], 1));
         let RBlock::Paragraph(inlines) = &resolved.chunks.last().unwrap().kind else {
             panic!("expected paragraph");
         };
         assert!(matches!(&inlines[0], RInline::Ref { exists: false, .. }));
+    }
+
+    fn math_doc(mode: MathMode, raw: &str) -> IrDoc {
+        IrDoc {
+            chunks: vec![IrChunk {
+                id: 1,
+                kind: IrBlock::Paragraph(vec![IrInline::Math(IrMathSource {
+                    mode,
+                    raw: raw.to_owned(),
+                    span: 0..raw.len(),
+                    payload_span: 0..raw.len(),
+                    line: 1,
+                })]),
+            }],
+        }
+    }
+
+    #[test]
+    fn resolves_display_fraction() {
+        let (resolved, diagnostics) = resolve(math_doc(MathMode::Display, " 1 / 2 "));
+        assert!(diagnostics.is_empty());
+        let RBlock::Paragraph(inlines) = &resolved.chunks[0].kind else {
+            panic!("expected paragraph");
+        };
+        assert!(matches!(
+            &inlines[0],
+            RInline::Math(RMathResult::Display(RMathExpr::Fraction { .. }))
+        ));
+    }
+
+    #[test]
+    fn invalid_display_fraction_becomes_error_node() {
+        let (resolved, diagnostics) = resolve(math_doc(MathMode::Display, "x"));
+        assert!(diagnostics.is_empty());
+        let RBlock::Paragraph(inlines) = &resolved.chunks[0].kind else {
+            panic!("expected paragraph");
+        };
+        assert!(matches!(
+            &inlines[0],
+            RInline::Error(RError {
+                kind: RErrorKind::Syntax,
+                code,
+                ..
+            }) if code == "unsupported-expression"
+        ));
+    }
+
+    #[test]
+    fn unsupported_compute_mode_becomes_error_node() {
+        let (resolved, diagnostics) = resolve(math_doc(MathMode::Compute, "1 / 2"));
+        assert!(diagnostics.is_empty());
+        let RBlock::Paragraph(inlines) = &resolved.chunks[0].kind else {
+            panic!("expected paragraph");
+        };
+        assert!(matches!(
+            &inlines[0],
+            RInline::Error(RError {
+                kind: RErrorKind::Unsupported,
+                code,
+                ..
+            }) if code == "unsupported-mode"
+        ));
     }
 }

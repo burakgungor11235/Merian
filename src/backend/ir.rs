@@ -1,3 +1,5 @@
+pub use crate::math::ir::IrMathSource;
+
 /// Basically this is where the fun begins.
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +55,7 @@ pub enum IrInline {
     Code { src: String, lang: Option<String> },
     Link { url: String, text: String },
     Image { src: String, alt: String },
+    Math(IrMathSource),
     Ref(usize),
 }
 

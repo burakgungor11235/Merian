@@ -1,7 +1,7 @@
 use giallo::{HighlightOptions, HtmlRenderer, Registry, RenderOptions, ThemeVariant};
 use std::{fmt::Write, process::exit};
 
-use crate::backend::rir::{RBlock, RInline, RListItem, ResolvedDoc};
+use crate::backend::rir::{ErrorRenderStrategy, RBlock, RError, RInline, RListItem, ResolvedDoc};
 
 const STYLE: &str = include_str!("data/merian-style.css");
 
@@ -97,6 +97,7 @@ impl Assembler {
             RBlock::List { items } => {
                 self.render_list(items);
             }
+            RBlock::Error(error) => self.render_error(error, true),
             RBlock::Rule => self.buffer.push_str("<hr>\n"),
         }
     }
@@ -287,6 +288,8 @@ impl Assembler {
                 self.escape_html(alt);
                 self.buffer.push_str("\">");
             }
+            RInline::Math(result) => crate::math::render::render(result, &mut self.buffer),
+            RInline::Error(error) => self.render_error(error, false),
             RInline::Ref { target, exists } => {
                 if *exists {
                     write!(
@@ -303,6 +306,33 @@ impl Assembler {
                 }
             }
         }
+    }
+
+    fn render_error(&mut self, error: &RError, block: bool) {
+        let content = match error.render {
+            ErrorRenderStrategy::SourceFallback => {
+                error.source.as_deref().unwrap_or(&error.message)
+            }
+            ErrorRenderStrategy::InlineMessage | ErrorRenderStrategy::BlockMessage => {
+                &error.message
+            }
+        };
+        let block = block || matches!(error.render, ErrorRenderStrategy::BlockMessage);
+        let (open, close) = if block {
+            // I think this is better than to invalidate the
+            // whole ass block
+            ("<div class=\"merian-error\" data-error-code=\"", "</div>\n")
+        } else {
+            ("<span class=\"merian-error\" data-error-code=\"", "</span>")
+        };
+
+        self.buffer.push_str(open);
+
+        self.escape_html(&error.code);
+        self.buffer.push_str(&format!("\"> {error:#?}")); // quite literally shit the error
+        // until I have a better way of debugging it.
+        self.escape_html(content);
+        self.buffer.push_str(close);
     }
 
     fn escape_html(&mut self, text: &str) {
@@ -366,5 +396,41 @@ impl Backend for Assembler {
 impl Default for Assembler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_native_fraction_mathml() {
+        let document = crate::parser::parse("$m 1 / 2 $");
+        let ir = crate::backend::ast_to_ir_lower::lower(&document);
+        let (resolved, diagnostics) = crate::backend::resolver::resolve(ir);
+        assert!(diagnostics.is_empty());
+
+        let html = Backend::emit(Assembler::default(), &resolved);
+        assert!(html.contains(
+            "<math class=\"merian-math\" xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\"><mfrac><mn>1</mn><mn>2</mn></mfrac></math>"
+        ));
+        assert!(!html.contains("$m 1 / 2 $"));
+    }
+
+    #[test]
+    fn renders_math_errors() {
+        let document = crate::parser::parse("$m x $");
+        let ir = crate::backend::ast_to_ir_lower::lower(&document);
+        let (resolved, diagnostics) = crate::backend::resolver::resolve(ir);
+        assert!(diagnostics.is_empty());
+
+        let html = Backend::emit(Assembler::default(), &resolved);
+        assert!(
+            html.contains(
+                "<span class=\"merian-error\" data-error-code=\"unsupported-expression\">"
+            )
+        );
+        assert!(html.contains("> x </span>"));
+        assert!(!html.contains("$m x $"));
     }
 }

@@ -99,6 +99,13 @@ fn lower_inline(inline: &Inline) -> IrInline {
             src: img_source.clone().into_owned(),
             alt: alt.clone().into_owned(),
         },
+        Inline::Math(source) => IrInline::Math(IrMathSource {
+            mode: source.mode,
+            raw: source.raw.to_owned(),
+            span: source.span.clone(),
+            payload_span: source.payload_span.clone(),
+            line: source.line,
+        }),
     }
 }
 
@@ -142,5 +149,19 @@ mod tests {
             &ir.chunks[1].kind,
             IrBlock::Quote { level: 1, .. }
         ));
+    }
+
+    #[test]
+    fn lower_math() {
+        let document = crate::parser::parse("$m 1 / 2 $");
+        let ir = lower(&document);
+        let IrBlock::Paragraph(inlines) = &ir.chunks[0].kind else {
+            panic!("expected paragraph");
+        };
+        let IrInline::Math(source) = &inlines[0] else {
+            panic!("expected math");
+        };
+        assert_eq!(source.raw, " 1 / 2 ");
+        assert_eq!(source.line, 1);
     }
 }

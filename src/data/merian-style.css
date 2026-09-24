@@ -265,3 +265,13 @@ code[style*="white-space: pre"] {
   display: inline-block;
   vertical-align: middle;
 }
+
+.merian-math {
+  font-size: 1em;
+}
+
+.merian-error {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.9em;
+}

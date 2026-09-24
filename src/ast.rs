@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 use std::fmt::{self, Display};
 
+use crate::math::MathMode;
+use logos::Span;
+
 #[derive(Debug)]
 pub struct Document<'a> {
     pub meta: DocumentMetadata,
@@ -113,4 +116,14 @@ pub enum Inline<'a> {
         img_source: Cow<'a, str>,
         alt: Cow<'a, str>,
     },
+    Math(MathSource<'a>),
+}
+
+#[derive(Debug)]
+pub struct MathSource<'a> {
+    pub mode: MathMode,
+    pub raw: &'a str,
+    pub span: Span,
+    pub payload_span: Span,
+    pub line: u32,
 }

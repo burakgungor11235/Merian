@@ -2,9 +2,10 @@ pub mod assembler;
 pub mod ast;
 pub mod backend;
 pub mod lexer;
+pub mod math;
 pub mod parser;
 
-pub use backend::rir::ResolvedDoc as MerianIR;
+pub use backend::rir::{ErrorRenderStrategy, RError, RErrorKind, ResolvedDoc as MerianIR};
 
 #[cfg(test)]
 mod tests {

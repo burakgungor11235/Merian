@@ -5,6 +5,7 @@ use std::collections::VecDeque;
 use crate::{
     ast::{AutoSymbol, Block, Document, DocumentMetadata, Inline, ListItem, ListMarker},
     lexer::Token::{self},
+    math::parser::{InlineMathParse, parse_inline_math},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,6 +169,7 @@ fn is_text_token(token: &Token<'_>) -> bool {
             | Token::ImageOpen
             | Token::Backslash
             | Token::Ampersand
+            | Token::Dollar
     )
 }
 
@@ -1021,6 +1023,32 @@ impl<'a> Parser<'a> {
             Some(Inline::Text("`"))
         }
     }
+    fn parse_math(&mut self) -> Option<Inline<'a>> {
+        let open_span = self.lexer.span();
+        let source = self.lexer.source();
+        let remainder = self.lexer.remainder();
+
+        match parse_inline_math(source, remainder, open_span.start, open_span.end) {
+            InlineMathParse::Math {
+                source: math_source,
+                consumed,
+            } => {
+                self.lexer.bump(consumed);
+                self.bump();
+                Some(Inline::Math(math_source))
+            }
+            InlineMathParse::Literal { end, consumed } => {
+                self.lexer.bump(consumed);
+                self.bump();
+                Some(Inline::Text(&self.lexer.source()[open_span.start..end]))
+            }
+            InlineMathParse::NotMath => {
+                self.bump();
+                Some(Inline::Text("$"))
+            }
+        }
+    }
+
     fn parse_escape(&mut self) -> Option<Inline<'a>> {
         debug_assert_eq!(self.current, Some(Token::Backslash));
         self.bump(); // \
@@ -1067,6 +1095,7 @@ impl<'a> Parser<'a> {
             Some(Token::HeadingMarker(s)) => Some(*s),
             Some(Token::Punctuation(s)) => Some(*s),
             Some(Token::Backslash) => Some("\\"),
+            Some(Token::Dollar) => Some("$"),
             _ => None,
         };
 
@@ -1101,6 +1130,8 @@ impl<'a> Parser<'a> {
         }
 
         match self.current {
+            Some(Token::Dollar) => self.parse_math(),
+
             Some(Token::Backtick) => self.parse_inline_code(),
 
             Some(Token::Backslash) => self.parse_escape(),
@@ -1432,4 +1463,80 @@ impl<'a> Parser<'a> {
         Inline::Image { img_source, alt }
     }
 }
-// tested by good enough tm
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::Block;
+    use crate::math::MathMode;
+
+    fn paragraph_inlines(input: &str) -> Vec<Inline<'_>> {
+        let document = parse(input);
+        let Some(Block::Paragraph(inlines)) = document.blocks.into_iter().next() else {
+            panic!("expected one paragraph");
+        };
+        inlines
+    }
+
+    #[test]
+    fn recognizes_inline_display_math() {
+        let inlines = paragraph_inlines("$m 1 / 2 $");
+        let [Inline::Math(source)] = inlines.as_slice() else {
+            panic!("expected one math inline");
+        };
+        assert_eq!(source.mode, MathMode::Display);
+        assert_eq!(source.raw, " 1 / 2 ");
+        assert_eq!(source.line, 1);
+    }
+
+    #[test]
+    fn leaves_currency_and_unclosed_math_as_text() {
+        let currency = paragraph_inlines("$50");
+        assert!(
+            currency
+                .iter()
+                .all(|inline| matches!(inline, Inline::Text(_)))
+        );
+        assert_eq!(
+            currency
+                .iter()
+                .map(|inline| match inline {
+                    Inline::Text(text) => *text,
+                    _ => unreachable!(),
+                })
+                .collect::<String>(),
+            "$50"
+        );
+
+        let unclosed = paragraph_inlines("$m 1 / 2\nnext");
+        assert!(
+            unclosed
+                .iter()
+                .all(|inline| matches!(inline, Inline::Text(_)))
+        );
+    }
+
+    #[test]
+    fn recognizes_compute_modes() {
+        let compute = paragraph_inlines("$= 1 $");
+        let [Inline::Math(source)] = compute.as_slice() else {
+            panic!("expected compute math");
+        };
+        assert_eq!(source.mode, MathMode::Compute);
+
+        let echo = paragraph_inlines("$?= 1 $");
+        let [Inline::Math(source)] = echo.as_slice() else {
+            panic!("expected both math"); // temporary naming is a pain..
+        };
+        assert_eq!(source.mode, MathMode::Both);
+    }
+
+    #[test]
+    fn does_not_recognize_escaped_dollar() {
+        let inlines = paragraph_inlines("\\$m 1 $");
+        assert!(
+            inlines
+                .iter()
+                .all(|inline| matches!(inline, Inline::Text(_)))
+        );
+    }
+}

@@ -1,3 +1,6 @@
+use crate::math::rir::RMathResult;
+
+use logos::Span;
 /// Resolved IR: same shape as [`IrDoc`],
 /// but every detail a renderer needs or the query language needs is baked in.
 /// This is the canonical output of Merian, everything that comes after it is up to your preference.
@@ -34,6 +37,7 @@ pub enum RBlock {
     List {
         items: Vec<RListItem>,
     },
+    Error(RError),
     Rule,
 }
 
@@ -55,5 +59,33 @@ pub enum RInline {
     Code { src: String, lang: Option<String> },
     Link { url: String, text: String },
     Image { src: String, alt: String },
+    Math(RMathResult),
+    Error(RError),
     Ref { target: usize, exists: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RErrorKind {
+    Syntax,
+    Unsupported,
+    Semantic,
+    Backend,
+    Document,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorRenderStrategy {
+    InlineMessage,
+    BlockMessage,
+    SourceFallback,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RError {
+    pub kind: RErrorKind,
+    pub code: String,
+    pub message: String,
+    pub span: Option<Span>,
+    pub source: Option<String>,
+    pub render: ErrorRenderStrategy,
 }

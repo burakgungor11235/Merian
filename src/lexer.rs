@@ -76,11 +76,14 @@ pub enum Token<'a> {
     #[token("\\", priority = 30)]
     Backslash,
 
+    #[token("$", priority = 30)]
+    Dollar, // I need a dolla dolla, will you give yo dolla to me!
+
     #[token("&", priority = 20)]
     Ampersand,
 
     // ON GOD THIS THING IS GOING TO BE HUGE AT THE END OF THIS. MY HEAD IS HURTING.
-    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>|+^.=\\\-&]+"#)]
+    #[regex(r#"[^ \t\n#*_~=`\[\]/'<>|+^.=\\\-&$]+"#)]
     Text(&'a str),
 
     #[regex(r"[#_~/']")]
@@ -145,10 +148,19 @@ mod tests {
         assert_eq!(lexer.next(), wrap!(Minus));
         assert_eq!(lexer.next(), wrap!(Minus));
         assert_eq!(lexer.next(), wrap!(Minus));
-        lexer.next(); // Whitespace
-        lexer.next(); // Text("ThematicBreak")
-        lexer.next(); // Newline
+        lexer.next();
+        lexer.next();
+        lexer.next();
         assert_eq!(lexer.next(), wrap!(ThematicBreak));
         assert_eq!(lexer.next(), wrap!(ThematicBreak));
+    }
+
+    #[test]
+    fn recognizes_dollar_separately() {
+        let mut lexer = Token::lexer("$m 1 / 2 $");
+        assert_eq!(lexer.next(), wrap!(Dollar));
+        assert_eq!(lexer.next(), wrap!(Text("m")));
+        assert_eq!(lexer.next(), wrap!(Whitespace(" ")));
+        assert_eq!(lexer.next(), wrap!(Text("1")));
     }
 }
