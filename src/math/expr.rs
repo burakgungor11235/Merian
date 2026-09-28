@@ -70,7 +70,15 @@ impl ExprError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Expr(Expr),
-    Binding { name: String, value: Expr },
+    Binding {
+        name: String,
+        value: Expr,
+    },
+    /// a = b
+    Relation {
+        lhs: Expr,
+        rhs: Expr,
+    },
 }
 
 /// The CEO of lexing presents:
@@ -250,9 +258,10 @@ impl<'a> Parser<'a> {
                         self.end,
                         0,
                     )),
-                    Some((MathToken::ColonEq, span)) => Err(ExprError::new(
+                    Some((MathToken::ColonEq | MathToken::Eq, span)) => Err(ExprError::new(
                         "unsupported-statement",
-                        "a `:=` binding must be at the top level of the envelope".to_string(),
+                        "a `:=` binding or `=` relation must be at the top level of the envelope"
+                            .to_string(),
                         span.start,
                         span.len(),
                     )),
@@ -325,9 +334,28 @@ pub fn parse_statement(source: &str) -> Result<Statement, ExprError> {
                 )),
             }
         }
-        Some((MathToken::Eq | MathToken::Colon, span)) => Err(ExprError::new(
+        Some((MathToken::Eq, _)) => {
+            parser.advance();
+            let rhs = parser.expression()?;
+            match parser.current() {
+                None => Ok(Statement::Relation { lhs: expr, rhs }),
+                Some((MathToken::Eq, span)) => Err(ExprError::new(
+                    "unsupported-statement",
+                    "chained relations are not supported yet".to_string(),
+                    span.start,
+                    span.len(),
+                )),
+                Some((_, span)) => Err(ExprError::new(
+                    "unexpected-token",
+                    "unexpected token after the relation".to_string(),
+                    span.start,
+                    span.len(),
+                )),
+            }
+        }
+        Some((MathToken::Colon, span)) => Err(ExprError::new(
             "unsupported-statement",
-            "relations and typed bindings are not supported yet".to_string(),
+            "typed bindings are not supported yet".to_string(),
             span.start,
             span.len(),
         )),

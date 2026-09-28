@@ -483,6 +483,15 @@ impl Assembler {
                 self.render_expression(inner);
                 self.buffer.push_str("<mo>)</mo></mrow>");
             }
+            RMathExpr::Relation { op, lhs, rhs } => {
+                self.buffer.push_str("<mrow>");
+                self.render_expression(lhs);
+                self.buffer.push_str("<mo>");
+                self.escape_html(op.as_str());
+                self.buffer.push_str("</mo>");
+                self.render_expression(rhs);
+                self.buffer.push_str("</mrow>");
+            }
         }
     }
 }

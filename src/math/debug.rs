@@ -132,6 +132,14 @@ fn dump_envelope(
     let (statement_label, binding, expression) = match statement {
         Statement::Expr(expression) => ("expression".to_string(), None, expression),
         Statement::Binding { name, value } => (format!("binding {name} :="), Some(name), value),
+        Statement::Relation { lhs, rhs } => {
+            out.push_str("  statement: relation\n");
+            out.push_str(&format!("  parse: {lhs:?} = {rhs:?}\n"));
+            let mut vars = lhs.free_vars();
+            vars.extend(rhs.free_vars());
+            out.push_str(&format!("  free vars: {vars:?}\n"));
+            return;
+        }
     };
 
     out.push_str(&format!("  statement: {statement_label}\n"));

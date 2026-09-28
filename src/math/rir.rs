@@ -21,6 +21,19 @@ impl RBinOp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RRelOp {
+    Eq,
+}
+
+impl RRelOp {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RRelOp::Eq => "=",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RMathExpr {
     Number(String),
@@ -36,6 +49,11 @@ pub enum RMathExpr {
     },
     Unary(Box<RMathExpr>),
     Paren(Box<RMathExpr>),
+    Relation {
+        op: RRelOp,
+        lhs: Box<RMathExpr>,
+        rhs: Box<RMathExpr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +90,19 @@ fn to_display_op(op: BinOp) -> RBinOp {
     }
 }
 
+pub fn relation_to_display(
+    lhs: &Expr,
+    rhs: &Expr,
+    tree: &ScopeArena,
+    scope: ScopeId,
+) -> RMathExpr {
+    RMathExpr::Relation {
+        op: RRelOp::Eq,
+        lhs: Box::new(to_display(lhs, tree, scope)),
+        rhs: Box::new(to_display(rhs, tree, scope)),
+    }
+}
+
 pub fn write_plain_text(result: &RMathResult, out: &mut String) {
     match result {
         RMathResult::Display(expression) => write_expression_text(expression, out),
@@ -104,6 +135,13 @@ fn write_expression_text(expression: &RMathExpr, out: &mut String) {
             out.push('(');
             write_expression_text(inner, out);
             out.push(')');
+        }
+        RMathExpr::Relation { op, lhs, rhs } => {
+            write_expression_text(lhs, out);
+            out.push(' ');
+            out.push_str(op.as_str());
+            out.push(' ');
+            write_expression_text(rhs, out);
         }
     }
 }

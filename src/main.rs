@@ -7,6 +7,10 @@ use clap::Parser;
 use merian_lang::assembler;
 use merian_lang::backend::ast_to_ir_lower::lower;
 use merian_lang::backend::resolver::resolve;
+use merian_lang::math::RMathResult;
+use merian_lang::math::expr::{Statement, parse_statement};
+use merian_lang::math::rir::{relation_to_display, write_plain_text};
+use merian_lang::math::{ScopeArena, solve};
 use merian_lang::{lexer, parser};
 
 #[derive(Parser, Debug)]
@@ -80,26 +84,44 @@ fn handle_cat() {
 }
 
 fn run_calc(expression: &str, debug: bool) {
-    let parsed = merian_lang::math::expr::parse(expression).unwrap_or_else(|error| {
+    let statement = parse_statement(expression).unwrap_or_else(|error| {
         if debug {
             eprintln!("parse error: {error:#?}");
         }
         eprintln!("error: {}: {}", error.code, error.message);
         std::process::exit(1);
     });
-    if debug {
-        print!("{}", merian_lang::math::debug::dump_expression(&parsed));
+
+    match statement {
+        Statement::Relation { lhs, rhs } => {
+            let tree = merian_lang::math::ScopeArena::document();
+            let relation = relation_to_display(&lhs, &rhs, &tree, tree.root());
+            let mut out = String::new();
+            write_plain_text(&RMathResult::Display(relation), &mut out);
+            println!("{out}");
+        }
+        Statement::Binding { .. } => {
+            eprintln!(
+                "error: unsupported-statement: `:=` bindings are not supported in calculator mode"
+            );
+            std::process::exit(1);
+        }
+        Statement::Expr(parsed) => {
+            if debug {
+                print!("{}", merian_lang::math::debug::dump_expression(&parsed));
+            }
+            let tree = ScopeArena::document();
+            let ctx = solve::EvalCtx {
+                tree: &tree,
+                scope: tree.root(),
+            };
+            let value = solve::eval(&parsed, &ctx).unwrap_or_else(|error| {
+                eprintln!("error: {}: {}", error.code, error.message);
+                std::process::exit(1);
+            });
+            println!("{}", value.to_plain_string());
+        }
     }
-    let tree = merian_lang::math::ScopeArena::document();
-    let ctx = merian_lang::math::solve::EvalCtx {
-        tree: &tree,
-        scope: tree.root(),
-    };
-    let value = merian_lang::math::solve::eval(&parsed, &ctx).unwrap_or_else(|error| {
-        eprintln!("error: {}: {}", error.code, error.message);
-        std::process::exit(1);
-    });
-    println!("{}", value.to_plain_string());
 }
 
 fn run(cli: &Cli) {

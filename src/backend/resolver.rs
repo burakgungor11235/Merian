@@ -304,6 +304,9 @@ mod tests {
                 }
                 RMathExpr::Paren(inner) => walk(inner, name, bound_to),
                 RMathExpr::Unary(operand) => walk(operand, name, bound_to),
+                RMathExpr::Relation { lhs, rhs, .. } => {
+                    walk(lhs, name, bound_to) || walk(rhs, name, bound_to)
+                }
                 RMathExpr::Number(_) => false,
             }
         }
@@ -515,13 +518,21 @@ mod tests {
     }
 
     #[test]
-    fn relations_and_typed_bindings_stay_unsupported() {
+    fn relations_render() {
         let nodes = nodes(&[
             (MathMode::Display, " r = r + 1 "),
             (MathMode::Display, " r: Quantity = 1 "),
-            (MathMode::Display, " (n := 3) "),
+            (MathMode::Display, " (n := 3) "), // lol
         ]);
-        for (index, node) in nodes.iter().enumerate() {
+        assert!(
+            matches!(
+                &nodes[0],
+                RInline::Math(RMathResult::Display(RMathExpr::Relation { .. }))
+            ),
+            "node 0 was {:?}",
+            nodes[0]
+        );
+        for (index, node) in nodes.iter().enumerate().skip(1) {
             assert!(
                 matches!(&node, RInline::Error(error) if error.code == "unsupported-statement"),
                 "node {index} was {:?}",

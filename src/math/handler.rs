@@ -4,9 +4,9 @@ use super::{
     MathMode,
     expr::{self, Statement},
     ir::IrMathSource,
-    rir::{RMathResult, to_display},
+    rir::{RMathResult, relation_to_display, to_display},
     scope::{ScopeArena, ScopeId},
-    solve::{EvalCtx, MathValue, eval, eval::EvalError},
+    solve::{EvalCtx, eval, eval::EvalError},
 };
 
 pub fn handle_math(
@@ -24,6 +24,9 @@ pub fn handle_math(
             tree.bind(scope, &name, bound, source.payload_span.clone());
             Ok(RMathResult::Silent)
         }
+        Statement::Relation { lhs, rhs } => Ok(RMathResult::Display(relation_to_display(
+            &lhs, &rhs, tree, scope,
+        ))),
         Statement::Expr(expression) => match source.mode {
             MathMode::Display => Ok(RMathResult::Display(to_display(&expression, tree, scope))),
 
