@@ -1,10 +1,14 @@
 use super::value::MathValue;
 use crate::math::expr::{BinOp, Expr};
+use crate::math::scope::{ScopeArena, ScopeId};
 
 /// epic calculator.
 
-#[derive(Debug, Default, Clone)]
-pub struct EvalCtx {}
+#[derive(Debug, Clone, Copy)]
+pub struct EvalCtx<'a> {
+    pub tree: &'a ScopeArena,
+    pub scope: ScopeId,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvalError {
@@ -23,10 +27,13 @@ impl EvalError {
 pub fn eval(expr: &Expr, ctx: &EvalCtx) -> Result<MathValue, EvalError> {
     match expr {
         Expr::Number(raw) => MathValue::from_decimal_str(raw),
-        Expr::Ident(name) => Err(EvalError::new(
-            "unknown-symbol",
-            format!("`{name}` is not bound; bindings arrive in Math M3"),
-        )),
+        Expr::Ident(name) => match ctx.tree.get(ctx.scope, name) {
+            Some(symbol) => Ok(symbol.value.clone()),
+            None => Err(EvalError::new(
+                "unknown-symbol",
+                format!("`{name}` is not bound"),
+            )),
+        },
         Expr::Binary { op, lhs, rhs } => {
             let lhs = eval(lhs, ctx)?;
             let rhs = eval(rhs, ctx)?;
@@ -47,10 +54,19 @@ mod tests {
     use super::*;
     use crate::math::expr::parse;
 
+    fn eval_in(source: &str, tree: &ScopeArena) -> Result<MathValue, EvalError> {
+        eval(
+            &parse(source).unwrap(),
+            &EvalCtx {
+                tree,
+                scope: tree.root(),
+            },
+        )
+    }
+
     fn calc(source: &str) -> String {
-        eval(&parse(source).unwrap(), &EvalCtx::default())
-            .unwrap()
-            .to_plain_string()
+        let tree = ScopeArena::document();
+        eval_in(source, &tree).unwrap().to_plain_string()
     }
 
     #[test]
@@ -66,12 +82,28 @@ mod tests {
     }
 
     #[test]
-    fn unknown_symbols_and_division_by_zero_error() {
-        let error = eval(&parse("pi * 2").unwrap(), &EvalCtx::default()).unwrap_err();
-        // pipi lol
+    fn unknown_symbols() {
+        let tree = ScopeArena::document();
+        let error = eval_in("pi * 2", &tree).unwrap_err();
         assert_eq!(error.code, "unknown-symbol");
+        assert_eq!(error.message, "`pi` is not bound");
+    }
 
-        let error = eval(&parse("1 / (2 - 2)").unwrap(), &EvalCtx::default()).unwrap_err();
+    #[test]
+    fn div_by_zero() {
+        let tree = ScopeArena::document();
+        let error = eval_in("1 / (2 - 2)", &tree).unwrap_err();
         assert_eq!(error.code, "division-by-zero");
+    }
+
+    #[test]
+    fn bound_symbols_resolve_during_eval() {
+        let mut tree = ScopeArena::document();
+        let root = tree.root();
+        tree.bind(root, "x", MathValue::from_decimal_str("5").unwrap(), 0..6);
+
+        assert_eq!(eval_in("x + 1", &tree).unwrap().to_plain_string(), "6");
+        assert_eq!(eval_in("x", &tree).unwrap().to_plain_string(), "5");
+        assert_eq!(eval_in("y", &tree).unwrap_err().code, "unknown-symbol");
     }
 }

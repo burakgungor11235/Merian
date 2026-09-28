@@ -32,6 +32,10 @@ struct Cli {
     #[arg(long = "dump-resolved")]
     dump_resolved: bool,
 
+    /// Dump the symbol table produced by resolution
+    #[arg(long = "dump-symbols")]
+    dump_symbols: bool,
+
     /// Dump tokens
     #[arg(long = "dump-tokens")]
     dump_tokens: bool,
@@ -86,12 +90,15 @@ fn run_calc(expression: &str, debug: bool) {
     if debug {
         print!("{}", merian_lang::math::debug::dump_expression(&parsed));
     }
-    let value =
-        merian_lang::math::solve::eval(&parsed, &merian_lang::math::solve::EvalCtx::default())
-            .unwrap_or_else(|error| {
-                eprintln!("error: {}: {}", error.code, error.message);
-                std::process::exit(1);
-            });
+    let tree = merian_lang::math::ScopeArena::document();
+    let ctx = merian_lang::math::solve::EvalCtx {
+        tree: &tree,
+        scope: tree.root(),
+    };
+    let value = merian_lang::math::solve::eval(&parsed, &ctx).unwrap_or_else(|error| {
+        eprintln!("error: {}: {}", error.code, error.message);
+        std::process::exit(1);
+    });
     println!("{}", value.to_plain_string());
 }
 
@@ -136,6 +143,9 @@ fn run(cli: &Cli) {
     }
     if cli.dump_resolved {
         println!("{resolved:#?}");
+    }
+    if cli.dump_symbols {
+        print!("{}", resolved.symbols.dump());
     }
 
     let html_output = assembler::Backend::emit(assembler::Assembler::default(), &resolved);

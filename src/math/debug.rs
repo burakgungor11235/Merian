@@ -1,11 +1,9 @@
 use crate::backend::ir::{IrBlock, IrDoc, IrInline};
 
-use super::expr::BinOp;
-use super::rir::{RBinOp, RMathExpr};
-
 use super::{
-    expr::{self, Expr},
+    expr::{self, Expr, Statement},
     ir::IrMathSource,
+    scope::{ScopeArena, ScopeId},
     solve::{EvalCtx, eval},
 };
 
@@ -19,9 +17,18 @@ struct Stats {
 pub fn dump_document_math(ir: &IrDoc) -> String {
     let mut out = String::new();
     let mut stats = Stats::default();
+    let mut tree = ScopeArena::document();
+    let scope = tree.root();
 
     for chunk in &ir.chunks {
-        walk_block(&chunk.kind, chunk.id, &mut out, &mut stats);
+        walk_block(
+            &chunk.kind,
+            chunk.id,
+            &mut out,
+            &mut stats,
+            &mut tree,
+            scope,
+        );
     }
 
     if stats.envelopes == 0 {
@@ -42,20 +49,27 @@ pub fn dump_expression(expression: &Expr) -> String {
     )
 }
 
-fn walk_block(block: &IrBlock, chunk_id: usize, out: &mut String, stats: &mut Stats) {
+fn walk_block(
+    block: &IrBlock,
+    chunk_id: usize,
+    out: &mut String,
+    stats: &mut Stats,
+    tree: &mut ScopeArena,
+    scope: ScopeId,
+) {
     match block {
         IrBlock::Heading { inlines, .. } | IrBlock::Paragraph(inlines) => {
-            walk_inlines(inlines, chunk_id, out, stats);
+            walk_inlines(inlines, chunk_id, out, stats, tree, scope);
         }
         IrBlock::Quote { body, .. } => {
             for inner in body {
-                walk_block(inner, chunk_id, out, stats);
+                walk_block(inner, chunk_id, out, stats, tree, scope);
             }
         }
         IrBlock::List { items } => {
             for item in items {
                 for inner in &item.body {
-                    walk_block(inner, chunk_id, out, stats);
+                    walk_block(inner, chunk_id, out, stats, tree, scope);
                 }
             }
         }
@@ -63,20 +77,34 @@ fn walk_block(block: &IrBlock, chunk_id: usize, out: &mut String, stats: &mut St
     }
 }
 
-fn walk_inlines(inlines: &[IrInline], chunk_id: usize, out: &mut String, stats: &mut Stats) {
+fn walk_inlines(
+    inlines: &[IrInline],
+    chunk_id: usize,
+    out: &mut String,
+    stats: &mut Stats,
+    tree: &mut ScopeArena,
+    scope: ScopeId,
+) {
     for inline in inlines {
         match inline {
-            IrInline::Math(source) => dump_envelope(chunk_id, source, out, stats),
+            IrInline::Math(source) => dump_envelope(chunk_id, source, out, stats, tree, scope),
             IrInline::Bold(inner)
             | IrInline::Italic(inner)
             | IrInline::Underline(inner)
-            | IrInline::Strike(inner) => walk_inlines(inner, chunk_id, out, stats),
+            | IrInline::Strike(inner) => walk_inlines(inner, chunk_id, out, stats, tree, scope),
             _ => {}
         }
     }
 }
-
-fn dump_envelope(chunk_id: usize, source: &IrMathSource, out: &mut String, stats: &mut Stats) {
+/// Bleh!
+fn dump_envelope(
+    chunk_id: usize,
+    source: &IrMathSource,
+    out: &mut String,
+    stats: &mut Stats,
+    tree: &mut ScopeArena,
+    scope: ScopeId,
+) {
     stats.envelopes += 1;
     out.push_str(&format!(
         "math #{}: chunk {}, line {}, mode {:?}\n  span {:?}, payload {:?}\n  raw: {:?}\n",
@@ -89,8 +117,8 @@ fn dump_envelope(chunk_id: usize, source: &IrMathSource, out: &mut String, stats
         source.raw
     ));
 
-    let expression = match expr::parse(&source.raw) {
-        Ok(expression) => expression,
+    let statement = match expr::parse_statement(&source.raw) {
+        Ok(statement) => statement,
         Err(error) => {
             stats.parse_errors += 1;
             out.push_str(&format!(
@@ -101,11 +129,24 @@ fn dump_envelope(chunk_id: usize, source: &IrMathSource, out: &mut String, stats
         }
     };
 
+    let (statement_label, binding, expression) = match statement {
+        Statement::Expr(expression) => ("expression".to_string(), None, expression),
+        Statement::Binding { name, value } => (format!("binding {name} :="), Some(name), value),
+    };
+
+    out.push_str(&format!("  statement: {statement_label}\n"));
     out.push_str(&format!("  parse: {expression:?}\n"));
     out.push_str(&format!("  free vars: {:?}\n", expression.free_vars()));
 
-    match eval(&expression, &EvalCtx::default()) {
-        Ok(value) => out.push_str(&format!("  eval: {}\n", value.to_plain_string())),
+    match eval(&expression, &EvalCtx { tree, scope }) {
+        Ok(value) => {
+            let plain = value.to_plain_string();
+            out.push_str(&format!("  eval: {plain}\n"));
+            if let Some(name) = binding {
+                out.push_str(&format!("  bound: {name} = {plain}\n"));
+                tree.bind(scope, &name, value, source.payload_span.clone());
+            }
+        }
         Err(error) => {
             stats.eval_errors += 1;
             out.push_str(&format!(
@@ -113,28 +154,5 @@ fn dump_envelope(chunk_id: usize, source: &IrMathSource, out: &mut String, stats
                 error.code, error.message
             ));
         }
-    }
-}
-
-pub fn to_display(expr: &Expr) -> RMathExpr {
-    match expr {
-        Expr::Number(raw) => RMathExpr::Number(raw.clone()),
-        Expr::Ident(name) => RMathExpr::Ident(name.clone()),
-        Expr::Binary { op, lhs, rhs } => RMathExpr::Binary {
-            op: to_display_op(*op),
-            lhs: Box::new(to_display(lhs)),
-            rhs: Box::new(to_display(rhs)),
-        },
-        Expr::Neg(operand) => RMathExpr::Unary(Box::new(to_display(operand))),
-        Expr::Paren(inner) => RMathExpr::Paren(Box::new(to_display(inner))),
-    }
-}
-
-fn to_display_op(op: BinOp) -> RBinOp {
-    match op {
-        BinOp::Add => RBinOp::Add,
-        BinOp::Sub => RBinOp::Sub,
-        BinOp::Mul => RBinOp::Mul,
-        BinOp::Div => RBinOp::Div,
     }
 }

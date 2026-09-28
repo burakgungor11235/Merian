@@ -1,6 +1,6 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use num_traits::{One, Zero};
+use num_traits::{One, Signed, Zero};
 
 use crate::math::solve::eval::EvalError;
 
@@ -84,6 +84,19 @@ impl MathValue {
             format!("{}/{}", self.inner.numer(), self.inner.denom())
         }
     }
+
+    pub fn display_parts(&self) -> (bool, String, Option<String>) {
+        let numerator = self.inner.numer();
+        let denominator = self.inner.denom();
+        let negative = numerator.is_negative();
+        let numerator = numerator.abs().to_string();
+        let denominator = if denominator.is_one() {
+            None
+        } else {
+            Some(denominator.to_string())
+        };
+        (negative, numerator, denominator)
+    }
 }
 
 #[cfg(test)]
@@ -130,5 +143,23 @@ mod tests {
         let value = MathValue::from_parts(BigInt::from(6), BigInt::from(-4)).unwrap();
         assert_eq!(value.to_plain_string(), "-3/2");
         assert!(MathValue::from_parts(BigInt::from(1), BigInt::from(0)).is_err());
+    }
+
+    #[test]
+    fn display_parts_split_sign_and_denominator() {
+        let integer = MathValue::from_decimal_str("12").unwrap();
+        assert_eq!(integer.display_parts(), (false, "12".to_string(), None));
+
+        let negative = MathValue::from_parts(BigInt::from(6), BigInt::from(-4)).unwrap();
+        assert_eq!(
+            negative.display_parts(),
+            (true, "3".to_string(), Some("2".to_string()))
+        );
+
+        let positive = MathValue::from_decimal_str("0.5").unwrap();
+        assert_eq!(
+            positive.display_parts(),
+            (false, "1".to_string(), Some("2".to_string()))
+        );
     }
 }

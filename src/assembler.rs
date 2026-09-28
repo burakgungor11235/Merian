@@ -3,7 +3,7 @@ use std::{fmt::Write, process::exit};
 
 use crate::{
     backend::rir::{ErrorRenderStrategy, RBlock, RError, RInline, RListItem, ResolvedDoc},
-    math::{RMathExpr, RMathResult, rir::RBinOp},
+    math::{RMathExpr, RMathResult, rir::RBinOp, solve::MathValue},
 };
 
 const STYLE: &str = include_str!("data/merian-style.css");
@@ -332,8 +332,9 @@ impl Assembler {
         self.buffer.push_str(open);
 
         self.escape_html(&error.code);
-        self.buffer.push_str(&format!("\"> {error:#?}")); // quite literally shit the error
-        // until I have a better way of debugging it.
+        self.buffer.push_str("\" title=\"");
+        self.escape_html(&error.message);
+        self.buffer.push_str("\"> ");
         self.escape_html(content);
         self.buffer.push_str(close);
     }
@@ -391,28 +392,67 @@ impl Assembler {
     // math
 
     fn render_math(&mut self, result: &RMathResult) {
+        if matches!(result, RMathResult::Silent) {
+            return;
+        }
+        self.buffer.push_str(
+            "<math class=\"merian-math\" xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\">",
+        );
         match result {
-            RMathResult::Display(expression) => {
-                self.buffer.push_str(
-                "<math class=\"merian-math\" xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\">",
-            );
-                self.render_expression(expression);
-                self.buffer.push_str("</math>");
+            RMathResult::Display(expression) => self.render_expression(expression),
+            RMathResult::Value(value) => self.render_value(value),
+            RMathResult::Both { input, value } => {
+                self.render_expression(input);
+                self.buffer.push_str("<mo>&#x2192;</mo>");
+                self.render_value(value);
+            }
+            RMathResult::Silent => {}
+        }
+        self.buffer.push_str("</math>");
+    }
+
+    fn render_value(&mut self, value: &MathValue) {
+        let (negative, numerator, denominator) = value.display_parts();
+        if negative {
+            self.buffer.push_str("<mo>-</mo>");
+        }
+        match denominator {
+            None => {
+                self.buffer.push_str("<mn>");
+                self.escape_html(&numerator);
+                self.buffer.push_str("</mn>");
+            }
+            Some(denominator) => {
+                self.buffer.push_str("<mfrac><mn>");
+                self.escape_html(&numerator);
+                self.buffer.push_str("</mn><mn>");
+                self.escape_html(&denominator);
+                self.buffer.push_str("</mn></mfrac>");
             }
         }
     }
 
     fn render_expression(&mut self, expression: &RMathExpr) {
+        eprint!("{expression:#?}");
         match expression {
             RMathExpr::Number(value) => {
                 self.buffer.push_str("<mn>");
                 self.escape_html(value);
                 self.buffer.push_str("</mn>");
             }
-            RMathExpr::Ident(name) => {
-                self.buffer.push_str("<mtext>");
+            RMathExpr::Ident { name, value } => {
+                self.buffer.push_str("<mi");
+                if name.chars().count() > 1 {
+                    self.buffer.push_str(" mathvariant=\"normal\"");
+                }
+                if let Some(value) = value {
+                    self.buffer.push_str(" title=\"");
+                    self.escape_html(&format!("{name} = {}", value.to_plain_string()));
+                    self.buffer.push('"');
+                }
+                self.buffer.push('>');
                 self.escape_html(name);
-                self.buffer.push_str("</mtext>");
+                self.buffer.push_str("</mi>");
             }
             RMathExpr::Binary {
                 op: RBinOp::Div,
@@ -442,15 +482,6 @@ impl Assembler {
                 self.buffer.push_str("<mrow><mo>(</mo>");
                 self.render_expression(inner);
                 self.buffer.push_str("<mo>)</mo></mrow>");
-            }
-            RMathExpr::Fraction {
-                numerator,
-                denominator,
-            } => {
-                self.buffer.push_str("<mfrac>");
-                self.render_expression(numerator);
-                self.render_expression(denominator);
-                self.buffer.push_str("</mfrac>");
             }
         }
     }

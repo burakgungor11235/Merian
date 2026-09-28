@@ -1,6 +1,8 @@
 use crate::math::rir::RMathResult;
+use crate::math::scope::ScopeArena;
 
 use logos::Span;
+
 /// Resolved IR: same shape as [`IrDoc`],
 /// but every detail a renderer needs or the query language needs is baked in.
 /// This is the canonical output of Merian, everything that comes after it is up to your preference.
@@ -9,6 +11,9 @@ use logos::Span;
 pub struct ResolvedDoc {
     pub title: String,
     pub chunks: Vec<RChunk>,
+    /// Symbol table as it stood when resolution finished. Node-level values are
+    /// already baked into [`RMathExpr`] this is for queries over declarations.
+    pub symbols: ScopeArena,
 }
 
 #[derive(Debug, Clone, PartialEq)]

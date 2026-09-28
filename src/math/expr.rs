@@ -67,29 +67,10 @@ impl ExprError {
     }
 }
 
-pub fn parse(source: &str) -> Result<Expr, ExprError> {
-    let tokens = tokenize(source)?;
-    let mut parser = Parser {
-        tokens,
-        pos: 0,
-        end: source.len(),
-    };
-    let expr = parser.expression()?;
-    match parser.current() {
-        None => Ok(expr),
-        Some((MathToken::Eq | MathToken::Colon, span)) => Err(ExprError::new(
-            "unsupported-statement",
-            "relations and bindings are not supported yet".to_string(),
-            span.start,
-            span.len(),
-        )),
-        Some((_, span)) => Err(ExprError::new(
-            "unexpected-token",
-            "unexpected token after the expression".to_string(),
-            span.start,
-            span.len(),
-        )),
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub enum Statement {
+    Expr(Expr),
+    Binding { name: String, value: Expr },
 }
 
 /// The CEO of lexing presents:
@@ -113,6 +94,8 @@ enum MathToken<'a> {
     LParen,
     #[token(")")]
     RParen,
+    #[token(":=")]
+    ColonEq,
     #[token("=")]
     Eq,
     #[token(":")]
@@ -267,6 +250,12 @@ impl<'a> Parser<'a> {
                         self.end,
                         0,
                     )),
+                    Some((MathToken::ColonEq, span)) => Err(ExprError::new(
+                        "unsupported-statement",
+                        "a `:=` binding must be at the top level of the envelope".to_string(),
+                        span.start,
+                        span.len(),
+                    )),
                     Some((_, span)) => Err(ExprError::new(
                         "unexpected-token",
                         "expected `)`".to_string(),
@@ -291,6 +280,76 @@ impl<'a> Parser<'a> {
     }
 }
 
+pub fn parse(source: &str) -> Result<Expr, ExprError> {
+    let (parser, expr) = parse_expression(source)?;
+    match parser.current() {
+        None => Ok(expr),
+        Some((MathToken::Eq | MathToken::Colon | MathToken::ColonEq, span)) => Err(ExprError::new(
+            "unsupported-statement",
+            "relations and bindings are not supported yet".to_string(),
+            span.start,
+            span.len(),
+        )),
+        Some((_, span)) => Err(ExprError::new(
+            "unexpected-token",
+            "unexpected token after the expression".to_string(),
+            span.start,
+            span.len(),
+        )),
+    }
+}
+
+pub fn parse_statement(source: &str) -> Result<Statement, ExprError> {
+    let (mut parser, expr) = parse_expression(source)?;
+
+    match parser.current() {
+        None => Ok(Statement::Expr(expr)),
+        Some((MathToken::ColonEq, span)) => {
+            parser.advance();
+            let Expr::Ident(name) = expr else {
+                return Err(ExprError::new(
+                    "invalid-binding",
+                    "`:=` binds a name, so the left side must be an identifier".to_string(),
+                    span.start,
+                    span.len(),
+                ));
+            };
+            let value = parser.expression()?;
+            match parser.current() {
+                None => Ok(Statement::Binding { name, value }),
+                Some((_, span)) => Err(ExprError::new(
+                    "unexpected-token",
+                    "unexpected token after the binding".to_string(),
+                    span.start,
+                    span.len(),
+                )),
+            }
+        }
+        Some((MathToken::Eq | MathToken::Colon, span)) => Err(ExprError::new(
+            "unsupported-statement",
+            "relations and typed bindings are not supported yet".to_string(),
+            span.start,
+            span.len(),
+        )),
+        Some((_, span)) => Err(ExprError::new(
+            "unexpected-token",
+            "unexpected token after the expression".to_string(),
+            span.start,
+            span.len(),
+        )),
+    }
+}
+
+fn parse_expression<'a>(source: &'a str) -> Result<(Parser<'a>, Expr), ExprError> {
+    let tokens = tokenize(source)?;
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        end: source.len(),
+    };
+    let expr = parser.expression()?;
+    Ok((parser, expr))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,5 +465,75 @@ mod tests {
         let vars: Vec<String> = expr.free_vars().into_iter().collect();
         assert_eq!(vars, ["a", "b", "c"]);
         assert!(parse("1 / 2").unwrap().free_vars().is_empty());
+    }
+
+    #[test]
+    fn colon_eq_binds_a_name() {
+        assert_eq!(
+            parse_statement("x := 5").unwrap(),
+            Statement::Binding {
+                name: "x".to_string(),
+                value: Expr::Number("5".to_string()),
+            }
+        );
+        assert_eq!(
+            parse_statement("total := (1 + 2) * 3").unwrap(),
+            Statement::Binding {
+                name: "total".to_string(),
+                value: Expr::Binary {
+                    op: BinOp::Mul,
+                    lhs: Box::new(Expr::Paren(Box::new(Expr::Binary {
+                        op: BinOp::Add,
+                        lhs: Box::new(Expr::Number("1".to_string())),
+                        rhs: Box::new(Expr::Number("2".to_string())),
+                    }))),
+                    rhs: Box::new(Expr::Number("3".to_string())),
+                },
+            }
+        );
+        assert_eq!(
+            parse_statement("1 + 2").unwrap(),
+            Statement::Expr(Expr::Binary {
+                op: BinOp::Add,
+                lhs: Box::new(Expr::Number("1".to_string())),
+                rhs: Box::new(Expr::Number("2".to_string())),
+            })
+        );
+    }
+
+    #[test]
+    fn bindings_are_top_level_only() {
+        assert_eq!(
+            parse_statement("(x := 5)").unwrap_err().code,
+            "unsupported-statement"
+        );
+        assert_eq!(
+            parse_statement("1 := 2").unwrap_err().code,
+            "invalid-binding"
+        );
+        assert_eq!(
+            parse_statement("(a + b) := 2").unwrap_err().code,
+            "invalid-binding" // should be valid in the future.
+        );
+    }
+
+    #[test]
+    fn bullshitto_rejeto() {
+        assert_eq!(
+            parse_statement("x := 5 +").unwrap_err().code,
+            "unexpected-eof"
+        );
+        assert_eq!(
+            parse_statement("x := 5 6").unwrap_err().code,
+            "unexpected-token"
+        );
+    }
+
+    #[test]
+    fn colon_eq_wins_over_a_bare_colon() {
+        let tokens = tokenize("x := 5").unwrap();
+        assert!(matches!(tokens[1].0, MathToken::ColonEq));
+        let tokens = tokenize("x: 5").unwrap();
+        assert!(matches!(tokens[1].0, MathToken::Colon));
     }
 }

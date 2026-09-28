@@ -1525,7 +1525,7 @@ mod tests {
 
         let echo = paragraph_inlines("$?= 1 $");
         let [Inline::Math(source)] = echo.as_slice() else {
-            panic!("expected both math"); // temporary naming is a pain..
+            panic!("expected both math");
         };
         assert_eq!(source.mode, MathMode::Both);
     }

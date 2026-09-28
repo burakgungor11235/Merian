@@ -1,21 +1,44 @@
-use crate::{
-    backend::rir::{ErrorRenderStrategy, RError, RErrorKind},
-    math::debug::to_display,
+use crate::backend::rir::{ErrorRenderStrategy, RError, RErrorKind};
+
+use super::{
+    MathMode,
+    expr::{self, Statement},
+    ir::IrMathSource,
+    rir::{RMathResult, to_display},
+    scope::{ScopeArena, ScopeId},
+    solve::{EvalCtx, MathValue, eval, eval::EvalError},
 };
 
-use super::{MathMode, expr, ir::IrMathSource, rir::RMathExpr};
+pub fn handle_math(
+    source: &IrMathSource,
+    tree: &mut ScopeArena,
+    scope: ScopeId,
+) -> Result<RMathResult, RError> {
+    let statement =
+        expr::parse_statement(&source.raw).map_err(|error| translate_error(source, error))?;
 
-pub fn handle_math(source: &IrMathSource) -> Result<RMathExpr, RError> {
-    match source.mode {
-        MathMode::Display => expr::parse(&source.raw)
-            .map(|expression| to_display(&expression))
-            .map_err(|error| translate_error(source, error)),
-        MathMode::Compute | MathMode::Both => Err(math_error(
-            source,
-            RErrorKind::Unsupported,
-            "unsupported-mode",
-            "math evaluation is not implemented for this mode",
-        )),
+    match statement {
+        Statement::Binding { name, value } => {
+            let bound = eval(&value, &EvalCtx { tree, scope })
+                .map_err(|error| translate_eval_error(source, error))?;
+            tree.bind(scope, &name, bound, source.payload_span.clone());
+            Ok(RMathResult::Silent)
+        }
+        Statement::Expr(expression) => match source.mode {
+            MathMode::Display => Ok(RMathResult::Display(to_display(&expression, tree, scope))),
+
+            MathMode::Compute => eval(&expression, &EvalCtx { tree, scope })
+                .map(RMathResult::Value)
+                .map_err(|error| translate_eval_error(source, error)),
+
+            MathMode::Both => {
+                let input = to_display(&expression, tree, scope);
+
+                eval(&expression, &EvalCtx { tree, scope })
+                    .map(|value| RMathResult::Both { input, value })
+                    .map_err(|error| translate_eval_error(source, error))
+            }
+        },
     }
 }
 
@@ -40,12 +63,11 @@ fn translate_error(source: &IrMathSource, error: expr::ExprError) -> RError {
     }
 }
 
-fn math_error(source: &IrMathSource, kind: RErrorKind, code: &str, message: &str) -> RError {
-    // cyka
+fn translate_eval_error(source: &IrMathSource, error: EvalError) -> RError {
     RError {
-        kind,
-        code: code.to_owned(),
-        message: message.to_owned(),
+        kind: RErrorKind::Semantic,
+        code: error.code.to_string(),
+        message: error.message,
         span: Some(0..source.raw.len()),
         source: Some(source.raw.clone()),
         render: ErrorRenderStrategy::SourceFallback,
