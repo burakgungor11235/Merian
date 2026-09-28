@@ -878,8 +878,22 @@ impl<'a> Parser<'a> {
                 Some(Token::Newline) => {
                     self.bump();
 
-                    if self.is_at_block_boundary() {
+                    if self.is_at_block_boundary()
+                        || matches!(self.current, None | Some(Token::ParagraphBreak))
+                    {
                         break;
+                    }
+
+                    // looks better
+                    let ends_with_space = matches!(
+                        result.last(),
+                        Some(Inline::Text(text)) if text.ends_with(char::is_whitespace)
+                    );
+                    if !result.is_empty()
+                        && !ends_with_space
+                        && !matches!(self.current, Some(Token::Whitespace(_)))
+                    {
+                        result.push(Inline::Text(" "));
                     }
                 }
 
