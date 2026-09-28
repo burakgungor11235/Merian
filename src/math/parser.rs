@@ -103,20 +103,7 @@ fn find_math_close(remainder: &str, start: usize) -> Option<usize> {
             continue;
         }
 
-        let before_ok = remainder[..index]
-            .chars()
-            .next_back()
-            .is_none_or(|c| c.is_whitespace());
-        let after_ok = remainder[index + 1..]
-            .chars()
-            .next()
-            .is_none_or(|c| c.is_whitespace() || c.is_ascii_punctuation());
-
-        if before_ok && after_ok {
-            return Some(index);
-        }
-
-        search = index + 1;
+        return Some(index);
     }
 
     None
