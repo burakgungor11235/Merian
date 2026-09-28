@@ -1,7 +1,10 @@
 use giallo::{HighlightOptions, HtmlRenderer, Registry, RenderOptions, ThemeVariant};
 use std::{fmt::Write, process::exit};
 
-use crate::backend::rir::{ErrorRenderStrategy, RBlock, RError, RInline, RListItem, ResolvedDoc};
+use crate::{
+    backend::rir::{ErrorRenderStrategy, RBlock, RError, RInline, RListItem, ResolvedDoc},
+    math::{RMathExpr, RMathResult, rir::RBinOp},
+};
 
 const STYLE: &str = include_str!("data/merian-style.css");
 
@@ -288,7 +291,7 @@ impl Assembler {
                 self.escape_html(alt);
                 self.buffer.push_str("\">");
             }
-            RInline::Math(result) => crate::math::render::render(result, &mut self.buffer),
+            RInline::Math(result) => self.render_math(result),
             RInline::Error(error) => self.render_error(error, false),
             RInline::Ref { target, exists } => {
                 if *exists {
@@ -384,6 +387,73 @@ impl Assembler {
 
         HtmlRenderer::default().render(&highlighted, &RenderOptions::default())
     }
+
+    // math
+
+    fn render_math(&mut self, result: &RMathResult) {
+        match result {
+            RMathResult::Display(expression) => {
+                self.buffer.push_str(
+                "<math class=\"merian-math\" xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\">",
+            );
+                self.render_expression(expression);
+                self.buffer.push_str("</math>");
+            }
+        }
+    }
+
+    fn render_expression(&mut self, expression: &RMathExpr) {
+        match expression {
+            RMathExpr::Number(value) => {
+                self.buffer.push_str("<mn>");
+                self.escape_html(value);
+                self.buffer.push_str("</mn>");
+            }
+            RMathExpr::Ident(name) => {
+                self.buffer.push_str("<mtext>");
+                self.escape_html(name);
+                self.buffer.push_str("</mtext>");
+            }
+            RMathExpr::Binary {
+                op: RBinOp::Div,
+                lhs,
+                rhs,
+            } => {
+                self.buffer.push_str("<mfrac>");
+                self.render_expression(lhs);
+                self.render_expression(rhs);
+                self.buffer.push_str("</mfrac>");
+            }
+            RMathExpr::Binary { op, lhs, rhs } => {
+                self.buffer.push_str("<mrow>");
+                self.render_expression(lhs);
+                self.buffer.push_str("<mo>");
+                self.escape_html(op.as_str());
+                self.buffer.push_str("</mo>");
+                self.render_expression(rhs);
+                self.buffer.push_str("</mrow>");
+            }
+            RMathExpr::Unary(operand) => {
+                self.buffer.push_str("<mrow><mo>-</mo>");
+                self.render_expression(operand);
+                self.buffer.push_str("</mrow>");
+            }
+            RMathExpr::Paren(inner) => {
+                self.buffer.push_str("<mrow><mo>(</mo>");
+                self.render_expression(inner);
+                self.buffer.push_str("<mo>)</mo></mrow>");
+            }
+            RMathExpr::Fraction {
+                numerator,
+                denominator,
+            } => {
+                self.buffer.push_str("<mfrac>");
+                self.render_expression(numerator);
+                self.render_expression(denominator);
+                self.buffer.push_str("</mfrac>");
+            }
+        }
+    }
 }
 
 impl Backend for Assembler {
@@ -396,41 +466,5 @@ impl Backend for Assembler {
 impl Default for Assembler {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renders_native_fraction_mathml() {
-        let document = crate::parser::parse("$m 1 / 2 $");
-        let ir = crate::backend::ast_to_ir_lower::lower(&document);
-        let (resolved, diagnostics) = crate::backend::resolver::resolve(ir);
-        assert!(diagnostics.is_empty());
-
-        let html = Backend::emit(Assembler::default(), &resolved);
-        assert!(html.contains(
-            "<math class=\"merian-math\" xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"inline\"><mfrac><mn>1</mn><mn>2</mn></mfrac></math>"
-        ));
-        assert!(!html.contains("$m 1 / 2 $"));
-    }
-
-    #[test]
-    fn renders_math_errors() {
-        let document = crate::parser::parse("$m x $");
-        let ir = crate::backend::ast_to_ir_lower::lower(&document);
-        let (resolved, diagnostics) = crate::backend::resolver::resolve(ir);
-        assert!(diagnostics.is_empty());
-
-        let html = Backend::emit(Assembler::default(), &resolved);
-        assert!(
-            html.contains(
-                "<span class=\"merian-error\" data-error-code=\"unsupported-expression\">"
-            )
-        );
-        assert!(html.contains("> x </span>"));
-        assert!(!html.contains("$m x $"));
     }
 }

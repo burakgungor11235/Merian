@@ -12,7 +12,9 @@ use merian_lang::{lexer, parser};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    input: PathBuf,
+    /// Input file (required unless -c/--calculator is used)
+    #[arg(required_unless_present = "calc")]
+    input: Option<PathBuf>,
 
     /// Place the output into <file> (defaults to standard output)
     #[arg(short = 'o', long = "output", value_name = "FILE")]
@@ -37,10 +39,22 @@ struct Cli {
     /// Cat
     #[arg(long = "cat")]
     cat: bool,
+
+    /// Dump math envelopes: parse trees, free variables, and eval previews
+    #[arg(long = "debug-math")]
+    debug_math: bool,
+
+    #[arg(long = "calculator", short = 'c', value_name = "EXPR")]
+    /// Evaluate a math expression and print the exact result
+    calc: Option<String>,
 }
 
 fn main() {
     let cli = Cli::parse();
+    if let Some(expression) = &cli.calc {
+        run_calc(expression, cli.debug_math);
+        return;
+    }
     run(&cli);
 }
 
@@ -61,9 +75,33 @@ fn handle_cat() {
         .spawn();
 }
 
+fn run_calc(expression: &str, debug: bool) {
+    let parsed = merian_lang::math::expr::parse(expression).unwrap_or_else(|error| {
+        if debug {
+            eprintln!("parse error: {error:#?}");
+        }
+        eprintln!("error: {}: {}", error.code, error.message);
+        std::process::exit(1);
+    });
+    if debug {
+        print!("{}", merian_lang::math::debug::dump_expression(&parsed));
+    }
+    let value =
+        merian_lang::math::solve::eval(&parsed, &merian_lang::math::solve::EvalCtx::default())
+            .unwrap_or_else(|error| {
+                eprintln!("error: {}: {}", error.code, error.message);
+                std::process::exit(1);
+            });
+    println!("{}", value.to_plain_string());
+}
+
 fn run(cli: &Cli) {
-    let source = fs::read_to_string(&cli.input).unwrap_or_else(|err| {
-        eprintln!(" cannot read input file '{}': {err}", cli.input.display(),);
+    let Some(input) = cli.input.as_deref() else {
+        eprintln!("error: no input file given");
+        std::process::exit(1);
+    };
+    let source = fs::read_to_string(input).unwrap_or_else(|err| {
+        eprintln!(" cannot read input file '{}': {err}", input.display(),);
         std::process::exit(1);
     });
 
@@ -87,6 +125,9 @@ fn run(cli: &Cli) {
     let ir = lower(&doc);
     if cli.dump_ir {
         println!("{ir:#?}");
+    }
+    if cli.debug_math {
+        print!("{}", merian_lang::math::debug::dump_document_math(&ir));
     }
 
     let (resolved, diags) = resolve(ir);

@@ -85,6 +85,12 @@ pub struct RError {
     pub kind: RErrorKind,
     pub code: String,
     pub message: String,
+
+    /// Highlight for this error. When `source` is `Some`, this is a byte range
+    /// within `source`, the text the error came from, so a renderer can
+    /// underline `source[span]`. Elsewise it is a document-absolute offset.
+    ///
+    /// bla bla bla. Debug information for poor souls.
     pub span: Option<Span>,
     pub source: Option<String>,
     pub render: ErrorRenderStrategy,

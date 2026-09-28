@@ -1,8 +1,10 @@
+pub mod debug;
+pub mod expr;
 pub(crate) mod handler;
 pub mod ir;
 pub(crate) mod parser;
-pub(crate) mod render;
 pub mod rir;
+pub mod solve;
 
 pub use ir::IrMathSource;
 pub use rir::{RMathExpr, RMathResult};

@@ -161,7 +161,7 @@ mod tests {
     use crate::math::{
         MathMode,
         ir::IrMathSource,
-        rir::{RMathExpr, RMathResult},
+        rir::{RBinOp, RMathExpr, RMathResult},
     };
 
     fn doc_with_refs(targets: &[usize], count: usize) -> IrDoc {
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_display_fraction() {
+    fn resolves_display_division() {
         let (resolved, diagnostics) = resolve(math_doc(MathMode::Display, " 1 / 2 "));
         assert!(diagnostics.is_empty());
         let RBlock::Paragraph(inlines) = &resolved.chunks[0].kind else {
@@ -236,13 +236,33 @@ mod tests {
         };
         assert!(matches!(
             &inlines[0],
-            RInline::Math(RMathResult::Display(RMathExpr::Fraction { .. }))
+            RInline::Math(RMathResult::Display(RMathExpr::Binary {
+                op: RBinOp::Div,
+                ..
+            }))
         ));
     }
 
     #[test]
-    fn invalid_display_fraction_becomes_error_node() {
-        let (resolved, diagnostics) = resolve(math_doc(MathMode::Display, "x"));
+    fn resolves_display_expression_with_identifiers() {
+        let (resolved, diagnostics) = resolve(math_doc(MathMode::Display, "x + y * 2"));
+        assert!(diagnostics.is_empty());
+        let RBlock::Paragraph(inlines) = &resolved.chunks[0].kind else {
+            panic!("expected paragraph");
+        };
+        assert!(matches!(
+            &inlines[0],
+            RInline::Math(RMathResult::Display(RMathExpr::Binary {
+                op: RBinOp::Add,
+                lhs,
+                ..
+            })) if matches!(**lhs, RMathExpr::Ident(ref name) if name == "x")
+        ));
+    }
+
+    #[test]
+    fn invalid_display_expression_becomes_error_node() {
+        let (resolved, diagnostics) = resolve(math_doc(MathMode::Display, "1 +"));
         assert!(diagnostics.is_empty());
         let RBlock::Paragraph(inlines) = &resolved.chunks[0].kind else {
             panic!("expected paragraph");
@@ -253,7 +273,7 @@ mod tests {
                 kind: RErrorKind::Syntax,
                 code,
                 ..
-            }) if code == "unsupported-expression"
+            }) if code == "unexpected-eof"
         ));
     }
 
